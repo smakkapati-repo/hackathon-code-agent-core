@@ -182,7 +182,7 @@ Resources:
   UploadedDocsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub '${ProjectName}-uploaded-docs-${Environment}'
+      BucketName: !Sub '${ProjectName}-uploaded-docs-${AWS::AccountId}-${Environment}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true

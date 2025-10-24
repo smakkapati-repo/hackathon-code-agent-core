@@ -460,7 +460,7 @@ def upload_csv_to_s3(csv_content: str, filename: str) -> str:
     try:
         import uuid
         
-        bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-164543933824-prod')
+        bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-prod')
         doc_id = str(uuid.uuid4())
         s3_key = f"csv/{doc_id}/{filename}"
         
@@ -502,7 +502,7 @@ def analyze_csv_peer_performance(s3_key: str, base_bank: str, peer_banks: List[s
         from io import StringIO
         
         # Get CSV from S3
-        bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-164543933824-prod')
+        bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-prod')
         response = s3.get_object(Bucket=bucket_name, Key=s3_key)
         csv_content = response['Body'].read().decode('utf-8')
         
@@ -584,7 +584,7 @@ def analyze_and_upload_pdf(file_content: str, filename: str) -> str:
         year = 2024
         
         # Upload to S3
-        bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-164543933824-prod')
+        bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-prod')
         doc_id = str(uuid.uuid4())
         s3_key = f"uploads/{doc_id}/{filename}"
         
@@ -637,7 +637,7 @@ def analyze_uploaded_pdf(s3_key: str, bank_name: str, analysis_type: str = "comp
     
     try:
         # Get PDF from S3
-        bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-164543933824-prod')
+        bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-prod')
         response = s3.get_object(Bucket=bucket_name, Key=s3_key)
         pdf_bytes = response['Body'].read()
         
@@ -918,7 +918,7 @@ def audit_document_analyzer(s3_key: str = "", bank_name: str = "", analysis_focu
         
         if s3_key:
             # Get document from S3 and analyze (simplified for demo)
-            bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-164543933824-prod')
+            bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-prod')
             try:
                 response = s3.get_object(Bucket=bucket_name, Key=s3_key)
                 # In real implementation, would extract and analyze document content
@@ -1008,7 +1008,7 @@ def chat_with_documents(question: str, s3_key: str = "", bank_name: str = "", us
         if s3_key:
             # Get PDF from S3 and extract text properly
             try:
-                bucket = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-164543933824-prod')
+                bucket = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-prod')
                 response = s3.get_object(Bucket=bucket, Key=s3_key)
                 
                 pdf_bytes = response['Body'].read()

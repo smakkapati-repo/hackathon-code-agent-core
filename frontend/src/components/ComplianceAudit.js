@@ -37,7 +37,7 @@ import {
   BarChart,
   PieChart
 } from '@mui/icons-material';
-import { AgentService } from '../services/AgentService';
+import AgentService from '../services/AgentService';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -408,7 +408,7 @@ const ComplianceAudit = () => {
                     <TableRow>
                       <TableCell>Tier 1 Capital Ratio</TableCell>
                       <TableCell align="right">7.74%</TableCell>
-                      <TableCell align="right">≥ 10.5% (Well Cap.)</TableCell>
+                      <TableCell align="right">&ge; 10.5% (Well Cap.)</TableCell>
                       <TableCell align="center">
                         <Chip label="Adequate" color="warning" size="small" />
                       </TableCell>
@@ -421,7 +421,7 @@ const ComplianceAudit = () => {
                     <TableRow>
                       <TableCell>CRE Concentration</TableCell>
                       <TableCell align="right">1.32%</TableCell>
-                      <TableCell align="right">< 300%</TableCell>
+                      <TableCell align="right">&lt; 300%</TableCell>
                       <TableCell align="center">
                         <Chip label="Excellent" color="success" size="small" />
                       </TableCell>
@@ -434,7 +434,7 @@ const ComplianceAudit = () => {
                     <TableRow>
                       <TableCell>Return on Assets (ROA)</TableCell>
                       <TableCell align="right">1.42%</TableCell>
-                      <TableCell align="right">≥ 0.8%</TableCell>
+                      <TableCell align="right">&ge; 0.8%</TableCell>
                       <TableCell align="center">
                         <Chip label="Strong" color="success" size="small" />
                       </TableCell>
@@ -447,7 +447,7 @@ const ComplianceAudit = () => {
                     <TableRow>
                       <TableCell>Equity to Assets</TableCell>
                       <TableCell align="right">8.5%</TableCell>
-                      <TableCell align="right">≥ 6.0%</TableCell>
+                      <TableCell align="right">&ge; 6.0%</TableCell>
                       <TableCell align="center">
                         <Chip label="Good" color="primary" size="small" />
                       </TableCell>

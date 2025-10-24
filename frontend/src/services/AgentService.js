@@ -280,6 +280,27 @@ class AgentService {
     }
   }
 
+  // Simple message sending for compatibility
+  async sendMessage(message) {
+    try {
+      const response = await fetch(`${this.baseURL}/api/agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: message })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.text();
+      return result;
+    } catch (error) {
+      console.error('Send message error:', error);
+      throw error;
+    }
+  }
+
   // Cleanup connections
   disconnect() {
     if (this.websocket) {
