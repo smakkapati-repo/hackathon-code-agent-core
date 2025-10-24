@@ -283,18 +283,18 @@ class AgentService {
   // Simple message sending for compatibility
   async sendMessage(message) {
     try {
-      const response = await fetch(`${this.baseURL}/api/agent`, {
+      const response = await fetch(`${this.baseURL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: message })
+        body: JSON.stringify({ message: message })
       });
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
-      const result = await response.text();
-      return result;
+      const result = await response.json();
+      return result.response || result.message || 'No response';
     } catch (error) {
       console.error('Send message error:', error);
       throw error;

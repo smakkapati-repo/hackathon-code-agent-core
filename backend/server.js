@@ -264,6 +264,19 @@ app.post('/api/invoke-agent', verifyToken, async (req, res) => {
   return invokeAgent(req, res);
 });
 
+// Simple agent endpoint (for compatibility with AgentService.sendMessage)
+app.post('/api/agent', async (req, res) => {
+  const { prompt } = req.body;
+  
+  if (!prompt) {
+    return res.status(400).json({ error: 'Missing prompt' });
+  }
+  
+  // Convert to the expected format and call invokeAgent
+  req.body = { inputText: prompt };
+  return invokeAgent(req, res);
+});
+
 // Shared agent invocation logic
 async function invokeAgent(req, res) {
   const { inputText, sessionId } = req.body;

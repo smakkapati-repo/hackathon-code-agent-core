@@ -14,7 +14,7 @@ import { cognitoConfig } from './config';
 import Home from './components/Home';
 import PeerAnalytics from './components/PeerAnalytics';
 import FinancialReports from './components/FinancialReports';
-import ComplianceAudit from './components/ComplianceAudit';
+import ComplianceAudit from './components/ComplianceAuditNew';
 import Login from './components/Login';
 
 // Configure Amplify v6
