@@ -728,7 +728,7 @@ Provide detailed insights."""
 
 @tool
 def compliance_risk_assessment(bank_name: str, cert: str = "") -> str:
-    """Perform comprehensive compliance risk assessment using FDIC data.
+    """Perform comprehensive compliance risk assessment using real FDIC data.
     
     Args:
         bank_name: Name of the bank to assess
@@ -747,8 +747,8 @@ def compliance_risk_assessment(bank_name: str, cert: str = "") -> str:
                 return json.dumps({"success": False, "error": f"Bank not found: {bank_name}"})
             cert = result['cert']
         
-        # Get latest FDIC data for compliance metrics
-        url = f"https://api.fdic.gov/banks/financials?filters=CERT:{cert}&fields=ASSET,ROA,ROE,EQTOT,LNLSNET,DEP,TIER1RWA,LNLSGR,NCRER,NIMY&limit=4&format=json"
+        # Get latest FDIC data with real compliance fields
+        url = f"https://api.fdic.gov/banks/financials?filters=CERT:{cert}&fields=CERT,NAME,ROA,ROE,EQTOT,ASSET,RBC1AAJ,RBCRWAJ,EQV,LNLSGR,NCRER,NIMY,DEP,LNLSNET,REPDTE&limit=2&format=json"
         response = requests.get(url, timeout=10)
         
         if response.status_code != 200:
@@ -760,51 +760,58 @@ def compliance_risk_assessment(bank_name: str, cert: str = "") -> str:
         
         latest = data[0]['data']
         
-        # Calculate compliance scores (0-100)
+        # Calculate compliance scores using real regulatory thresholds
         scores = {}
         alerts = []
         
-        # Capital Adequacy (Tier 1 Capital Ratio)
-        tier1_ratio = float(latest.get('TIER1RWA', 0) or 0)
-        if tier1_ratio >= 10.5:
-            scores['capital_adequacy'] = 90
-        elif tier1_ratio >= 8.5:
-            scores['capital_adequacy'] = 75
-            alerts.append({"type": "warning", "message": f"Tier 1 Capital ratio {tier1_ratio:.1f}% approaching minimum"})
+        # Capital Adequacy - Tier 1 Capital Ratio (RBC1AAJ)
+        tier1_ratio = float(latest.get('RBC1AAJ', 0) or 0)
+        if tier1_ratio >= 10.5:  # Well capitalized
+            scores['capital_adequacy'] = 95
+        elif tier1_ratio >= 8.5:  # Adequately capitalized
+            scores['capital_adequacy'] = 80
+            alerts.append({"type": "warning", "message": f"Tier 1 Capital ratio {tier1_ratio:.1f}% approaching well-capitalized threshold"})
+        elif tier1_ratio >= 6.0:  # Undercapitalized
+            scores['capital_adequacy'] = 60
+            alerts.append({"type": "error", "message": f"Tier 1 Capital ratio {tier1_ratio:.1f}% below adequately capitalized threshold"})
         else:
-            scores['capital_adequacy'] = 50
-            alerts.append({"type": "error", "message": f"Tier 1 Capital ratio {tier1_ratio:.1f}% below regulatory minimum"})
+            scores['capital_adequacy'] = 30
+            alerts.append({"type": "error", "message": f"Tier 1 Capital ratio {tier1_ratio:.1f}% critically low"})
         
-        # Asset Quality (Loan Growth vs Provisions)
-        loan_growth = float(latest.get('LNLSGR', 0) or 0)
-        if loan_growth < 15:
-            scores['asset_quality'] = 85
-        elif loan_growth < 25:
-            scores['asset_quality'] = 70
-            alerts.append({"type": "warning", "message": f"Loan loss provisions {loan_growth:.1f}% elevated"})
-        else:
-            scores['asset_quality'] = 55
-            alerts.append({"type": "error", "message": f"Loan loss provisions {loan_growth:.1f}% concerning"})
-        
-        # CRE Concentration Risk
+        # Asset Quality - CRE Concentration Risk (NCRER)
         cre_ratio = float(latest.get('NCRER', 0) or 0)
-        if cre_ratio < 300:
-            scores['cre_concentration'] = 90
+        if cre_ratio < 300:  # Below regulatory guidance
+            scores['asset_quality'] = 90
         elif cre_ratio < 400:
-            scores['cre_concentration'] = 70
-            alerts.append({"type": "warning", "message": f"CRE concentration {cre_ratio:.0f}% above 300% threshold"})
+            scores['asset_quality'] = 70
+            alerts.append({"type": "warning", "message": f"CRE concentration {cre_ratio:.1f}% above 300% guidance threshold"})
         else:
-            scores['cre_concentration'] = 50
-            alerts.append({"type": "error", "message": f"CRE concentration {cre_ratio:.0f}% significantly elevated"})
+            scores['asset_quality'] = 50
+            alerts.append({"type": "error", "message": f"CRE concentration {cre_ratio:.1f}% significantly elevated"})
         
-        # Profitability (ROA)
-        roa = float(latest.get('ROA', 0) or 0)
-        if roa >= 1.0:
-            scores['profitability'] = 85
-        elif roa >= 0.5:
-            scores['profitability'] = 70
+        # Liquidity - Equity to Assets Ratio (EQV)
+        equity_ratio = float(latest.get('EQV', 0) or 0)
+        if equity_ratio >= 10.0:
+            scores['liquidity'] = 90
+        elif equity_ratio >= 8.0:
+            scores['liquidity'] = 75
+        elif equity_ratio >= 6.0:
+            scores['liquidity'] = 60
+            alerts.append({"type": "warning", "message": f"Equity ratio {equity_ratio:.1f}% below optimal levels"})
         else:
-            scores['profitability'] = 55
+            scores['liquidity'] = 40
+            alerts.append({"type": "error", "message": f"Equity ratio {equity_ratio:.1f}% concerning"})
+        
+        # Profitability - ROA
+        roa = float(latest.get('ROA', 0) or 0)
+        if roa >= 1.2:
+            scores['profitability'] = 90
+        elif roa >= 0.8:
+            scores['profitability'] = 75
+        elif roa >= 0.4:
+            scores['profitability'] = 60
+        else:
+            scores['profitability'] = 40
             alerts.append({"type": "warning", "message": f"ROA {roa:.2f}% below peer average"})
         
         # Overall compliance score
@@ -812,17 +819,25 @@ def compliance_risk_assessment(bank_name: str, cert: str = "") -> str:
         
         return json.dumps({
             "success": True,
-            "bank_name": bank_name,
+            "bank_name": latest.get('NAME', bank_name),
             "overall_score": round(overall_score),
-            "scores": scores,
+            "scores": {
+                "capital_adequacy": round(scores['capital_adequacy']),
+                "asset_quality": round(scores['asset_quality']),
+                "liquidity": round(scores['liquidity']),
+                "profitability": round(scores['profitability'])
+            },
             "alerts": alerts,
             "metrics": {
-                "tier1_capital": tier1_ratio,
-                "loan_provisions": loan_growth,
-                "cre_concentration": cre_ratio,
-                "roa": roa
+                "tier1_capital_ratio": round(tier1_ratio, 2),
+                "cre_concentration": round(cre_ratio, 1),
+                "equity_ratio": round(equity_ratio, 1),
+                "roa": round(roa, 2),
+                "roe": round(float(latest.get('ROE', 0) or 0), 2),
+                "assets_billions": round(float(latest.get('ASSET', 0) or 0) / 1000000, 1)
             },
-            "last_updated": latest.get('REPYMD', 'Unknown')
+            "report_date": latest.get('REPDTE', 'Unknown'),
+            "regulatory_status": "Well Capitalized" if tier1_ratio >= 10.5 else "Adequately Capitalized" if tier1_ratio >= 8.5 else "Undercapitalized"
         })
         
     except Exception as e:
