@@ -10,7 +10,7 @@
 ### Amazon Bedrock AgentCore + Strands Framework
 This is a **reference implementation** showcasing:
 - **Amazon Bedrock AgentCore** - AWS's newly launched managed agent runtime (announced October 2025)
-- **Strands Framework** - Python-based agent orchestration with 12 custom tools
+- **Strands Framework** - Python-based agent orchestration with 16 custom tools
 - **Production Architecture** - CloudFront + ECS + Cognito + AgentCore (no API Gateway)
 - **Conversational Memory** - Multi-turn conversations with context retention
 - **Tool Orchestration** - Claude Sonnet 4.5 automatically selects from 12 specialized tools
@@ -78,7 +78,7 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 - **Regulatory Alerts**: Automated compliance monitoring and alerts
 
 
-## 🎯 AI Agent Tools (12 Custom Tools)
+## 🎯 AI Agent Tools (16 Custom Tools)
 
 **Strands Framework Implementation** - Each tool is a Python function with:
 - Input/output schemas (Pydantic models)
@@ -98,6 +98,10 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 10. `analyze_and_upload_pdf` - Upload and analyze PDFs (PyPDF2 + Claude)
 11. `analyze_uploaded_pdf` - Analyze PDFs in S3
 12. `chat_with_documents` - Multi-turn document Q&A with memory
+13. `compliance_risk_assessment` - Real-time compliance scoring using FDIC data
+14. `regulatory_alerts_monitor` - Monitor regulatory thresholds and generate alerts
+15. `audit_document_analyzer` - Analyze documents for audit findings and compliance issues
+16. `upload_document_to_s3` - Legacy upload function (redirects to analyze_and_upload_pdf)
 
 **Tool Orchestration**: Claude Sonnet 4.5 automatically selects the right tool(s) based on user intent. For example:
 - "Compare JPMorgan and Bank of America ROA" → `compare_banks` tool
@@ -220,7 +224,7 @@ cd amzon-bedrock-agentcore-bank-analytics
   - ECR repositories
 
 - 🔵 **[2/4] AgentCore Agent** (~5-7 minutes)
-  - Builds and deploys Python agent with 12 tools
+  - Builds and deploys Python agent with 16 tools
   - Adds S3 permissions automatically
   - Creates conversational memory
 
