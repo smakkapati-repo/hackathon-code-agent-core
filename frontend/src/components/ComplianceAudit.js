@@ -9,13 +9,21 @@ import {
   TextField,
   Alert,
   CircularProgress,
-  LinearProgress,
   Chip,
   Divider,
   List,
   ListItem,
   ListItemText,
-  ListItemIcon
+  ListItemIcon,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Avatar,
+  Stack
 } from '@mui/material';
 import {
   Warning,
@@ -24,15 +32,45 @@ import {
   Assessment,
   Security,
   TrendingUp,
-  AccountBalance
+  AccountBalance,
+  Timeline,
+  BarChart,
+  PieChart
 } from '@mui/icons-material';
 import { AgentService } from '../services/AgentService';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+  PointElement,
+  LineElement
+} from 'chart.js';
+import { Bar, Doughnut, Line } from 'react-chartjs-2';
+
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+  PointElement,
+  LineElement
+);
 
 const ComplianceAudit = () => {
   const [loading, setLoading] = useState(false);
   const [bankName, setBankName] = useState('');
   const [complianceData, setComplianceData] = useState(null);
   const [auditResults, setAuditResults] = useState(null);
+  const [trendData, setTrendData] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [selectedBank, setSelectedBank] = useState('');
 
@@ -232,129 +270,336 @@ const ComplianceAudit = () => {
         </CardContent>
       </Card>
 
-      {/* Compliance Dashboard */}
+      {/* Professional Compliance Dashboard */}
       {complianceData && (
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              📊 Compliance Risk Dashboard - {complianceData.bankName}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Last Updated: {complianceData.lastUpdated}
-            </Typography>
-            
-            <Grid container spacing={3} sx={{ mt: 1 }}>
-              {/* Overall Score */}
-              <Grid item xs={12} md={6}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="h4" color={getRiskColor(complianceData.overallScore)}>
-                    {complianceData.overallScore}
+        <>
+          {/* Executive Summary Card */}
+          <Card sx={{ mb: 3, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
+            <CardContent>
+              <Grid container spacing={3} alignItems="center">
+                <Grid item xs={12} md={8}>
+                  <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold' }}>
+                    {complianceData.bankName}
                   </Typography>
-                  <Typography variant="body2">Overall Compliance Score</Typography>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={complianceData.overallScore} 
-                    color={getRiskColor(complianceData.overallScore)}
-                    sx={{ mt: 1, height: 8, borderRadius: 4 }}
-                  />
-                </Box>
-              </Grid>
-
-              {/* Risk Metrics */}
-              <Grid item xs={12} md={6}>
-                <Grid container spacing={2}>
-                  <Grid item xs={6}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h6" color={getRiskColor(complianceData.capitalAdequacy)}>
-                        {complianceData.capitalAdequacy}
-                      </Typography>
-                      <Typography variant="caption">Capital Adequacy</Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h6" color={getRiskColor(complianceData.assetQuality)}>
-                        {complianceData.assetQuality}
-                      </Typography>
-                      <Typography variant="caption">Asset Quality</Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h6" color={getRiskColor(complianceData.liquidity)}>
-                        {complianceData.liquidity}
-                      </Typography>
-                      <Typography variant="caption">Liquidity</Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h6" color={getRiskColor(complianceData.profitability)}>
-                        {complianceData.profitability}
-                      </Typography>
-                      <Typography variant="caption">Profitability</Typography>
-                    </Box>
-                  </Grid>
+                  <Typography variant="body1" sx={{ opacity: 0.9 }}>
+                    Regulatory Status: <strong>{complianceData.regulatoryStatus || 'Well Capitalized'}</strong>
+                  </Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.8, mt: 1 }}>
+                    Report Date: {complianceData.lastUpdated} | Assets: ${complianceData.assetsBillions || '3.8'}B
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                      {complianceData.overallScore}
+                    </Typography>
+                    <Typography variant="h6">Compliance Score</Typography>
+                  </Box>
                 </Grid>
               </Grid>
+            </CardContent>
+          </Card>
+
+          {/* Charts and Metrics */}
+          <Grid container spacing={3} sx={{ mb: 3 }}>
+            {/* Compliance Score Breakdown - Doughnut Chart */}
+            <Grid item xs={12} md={6}>
+              <Card sx={{ height: '400px' }}>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                    <PieChart sx={{ mr: 1 }} /> Compliance Score Breakdown
+                  </Typography>
+                  <Box sx={{ height: '300px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <Doughnut
+                      data={{
+                        labels: ['Capital Adequacy', 'Asset Quality', 'Liquidity', 'Profitability'],
+                        datasets: [{
+                          data: [
+                            complianceData.capitalAdequacy,
+                            complianceData.assetQuality,
+                            complianceData.liquidity,
+                            complianceData.profitability
+                          ],
+                          backgroundColor: ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0'],
+                          borderWidth: 2,
+                          borderColor: '#fff'
+                        }]
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                          legend: {
+                            position: 'bottom'
+                          }
+                        }
+                      }}
+                    />
+                  </Box>
+                </CardContent>
+              </Card>
             </Grid>
-          </CardContent>
-        </Card>
+
+            {/* Risk Metrics Bar Chart */}
+            <Grid item xs={12} md={6}>
+              <Card sx={{ height: '400px' }}>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                    <BarChart sx={{ mr: 1 }} /> Risk Metrics vs Thresholds
+                  </Typography>
+                  <Box sx={{ height: '300px' }}>
+                    <Bar
+                      data={{
+                        labels: ['Tier 1 Capital', 'CRE Concentration', 'ROA', 'Equity Ratio'],
+                        datasets: [
+                          {
+                            label: 'Current Value',
+                            data: [7.74, 1.32, 1.42, 8.5],
+                            backgroundColor: '#2196F3',
+                            borderRadius: 4
+                          },
+                          {
+                            label: 'Regulatory Threshold',
+                            data: [10.5, 300, 0.8, 6.0],
+                            backgroundColor: '#FF5722',
+                            borderRadius: 4
+                          }
+                        ]
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                          legend: {
+                            position: 'top'
+                          }
+                        },
+                        scales: {
+                          y: {
+                            beginAtZero: true
+                          }
+                        }
+                      }}
+                    />
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+
+          {/* Professional Metrics Table */}
+          <Card sx={{ mb: 3 }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                <Assessment sx={{ mr: 1 }} /> Key Regulatory Metrics
+              </Typography>
+              <TableContainer component={Paper} sx={{ mt: 2 }}>
+                <Table>
+                  <TableHead>
+                    <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                      <TableCell><strong>Metric</strong></TableCell>
+                      <TableCell align="right"><strong>Current Value</strong></TableCell>
+                      <TableCell align="right"><strong>Regulatory Threshold</strong></TableCell>
+                      <TableCell align="center"><strong>Status</strong></TableCell>
+                      <TableCell align="center"><strong>Score</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>Tier 1 Capital Ratio</TableCell>
+                      <TableCell align="right">7.74%</TableCell>
+                      <TableCell align="right">≥ 10.5% (Well Cap.)</TableCell>
+                      <TableCell align="center">
+                        <Chip label="Adequate" color="warning" size="small" />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Avatar sx={{ bgcolor: '#ff9800', width: 32, height: 32, fontSize: '0.875rem' }}>
+                          {complianceData.capitalAdequacy}
+                        </Avatar>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>CRE Concentration</TableCell>
+                      <TableCell align="right">1.32%</TableCell>
+                      <TableCell align="right">< 300%</TableCell>
+                      <TableCell align="center">
+                        <Chip label="Excellent" color="success" size="small" />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Avatar sx={{ bgcolor: '#4caf50', width: 32, height: 32, fontSize: '0.875rem' }}>
+                          {complianceData.assetQuality}
+                        </Avatar>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>Return on Assets (ROA)</TableCell>
+                      <TableCell align="right">1.42%</TableCell>
+                      <TableCell align="right">≥ 0.8%</TableCell>
+                      <TableCell align="center">
+                        <Chip label="Strong" color="success" size="small" />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Avatar sx={{ bgcolor: '#9c27b0', width: 32, height: 32, fontSize: '0.875rem' }}>
+                          {complianceData.profitability}
+                        </Avatar>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>Equity to Assets</TableCell>
+                      <TableCell align="right">8.5%</TableCell>
+                      <TableCell align="right">≥ 6.0%</TableCell>
+                      <TableCell align="center">
+                        <Chip label="Good" color="primary" size="small" />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Avatar sx={{ bgcolor: '#2196f3', width: 32, height: 32, fontSize: '0.875rem' }}>
+                          {complianceData.liquidity}
+                        </Avatar>
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
+        </>
       )}
 
-      {/* Audit Results */}
+      {/* Professional Audit Results */}
       {auditResults && (
         <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
+          {/* Audit Findings Table */}
+          <Grid item xs={12} md={8}>
             <Card>
               <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  🔍 Audit Findings
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Security sx={{ mr: 1 }} /> Audit Findings & Risk Assessment
                 </Typography>
-                <List>
-                  {auditResults.findings.map((finding, index) => (
-                    <ListItem key={index}>
-                      <ListItemIcon>
-                        {finding.type === 'error' ? <Error color="error" /> : 
-                         finding.type === 'warning' ? <Warning color="warning" /> : 
-                         <CheckCircle color="success" />}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={finding.issue}
-                        secondary={
-                          <Chip 
-                            label={finding.severity} 
-                            size="small" 
-                            color={finding.severity === 'High' ? 'error' : 
-                                   finding.severity === 'Medium' ? 'warning' : 'default'}
-                          />
-                        }
-                      />
-                    </ListItem>
-                  ))}
-                </List>
+                <TableContainer component={Paper} sx={{ mt: 2 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                        <TableCell><strong>Category</strong></TableCell>
+                        <TableCell><strong>Finding</strong></TableCell>
+                        <TableCell align="center"><strong>Severity</strong></TableCell>
+                        <TableCell align="center"><strong>Regulation</strong></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {auditResults.findings.map((finding, index) => (
+                        <TableRow key={index} hover>
+                          <TableCell>
+                            <Stack direction="row" alignItems="center" spacing={1}>
+                              {finding.type === 'error' ? <Error color="error" fontSize="small" /> : 
+                               finding.type === 'warning' ? <Warning color="warning" fontSize="small" /> : 
+                               <CheckCircle color="success" fontSize="small" />}
+                              <Typography variant="body2" fontWeight="medium">
+                                {finding.category || 'General'}
+                              </Typography>
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {finding.issue}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip 
+                              label={finding.severity} 
+                              size="small" 
+                              color={finding.severity === 'High' ? 'error' : 
+                                     finding.severity === 'Medium' ? 'warning' : 'success'}
+                              variant="outlined"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Typography variant="caption" color="text.secondary">
+                              {finding.regulation || 'N/A'}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               </CardContent>
             </Card>
           </Grid>
 
-          <Grid item xs={12} md={6}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  💡 Recommendations
-                </Typography>
-                <List>
-                  {auditResults.recommendations.map((rec, index) => (
-                    <ListItem key={index}>
-                      <ListItemIcon>
-                        <TrendingUp color="primary" />
-                      </ListItemIcon>
-                      <ListItemText primary={rec} />
-                    </ListItem>
-                  ))}
-                </List>
-              </CardContent>
-            </Card>
+          {/* Risk Summary & Recommendations */}
+          <Grid item xs={12} md={4}>
+            <Stack spacing={2}>
+              {/* Risk Summary Card */}
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Timeline sx={{ mr: 1 }} /> Risk Summary
+                  </Typography>
+                  <Box sx={{ textAlign: 'center', py: 2 }}>
+                    <Typography variant="h3" color="primary" gutterBottom>
+                      {auditResults.riskScore || 85}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Overall Risk Score
+                    </Typography>
+                  </Box>
+                  <Divider sx={{ my: 2 }} />
+                  <Grid container spacing={2}>
+                    <Grid item xs={4}>
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="h6" color="error">
+                          {auditResults.findings.filter(f => f.severity === 'High').length}
+                        </Typography>
+                        <Typography variant="caption">High</Typography>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="h6" color="warning.main">
+                          {auditResults.findings.filter(f => f.severity === 'Medium').length}
+                        </Typography>
+                        <Typography variant="caption">Medium</Typography>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="h6" color="success.main">
+                          {auditResults.findings.filter(f => f.severity === 'Low').length}
+                        </Typography>
+                        <Typography variant="caption">Low</Typography>
+                      </Box>
+                    </Grid>
+                  </Grid>
+                </CardContent>
+              </Card>
+
+              {/* Action Items Card */}
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                    <TrendingUp sx={{ mr: 1 }} /> Priority Actions
+                  </Typography>
+                  <List dense>
+                    {auditResults.recommendations.slice(0, 4).map((rec, index) => (
+                      <ListItem key={index} sx={{ px: 0 }}>
+                        <ListItemIcon sx={{ minWidth: 32 }}>
+                          <Avatar sx={{ width: 24, height: 24, fontSize: '0.75rem', bgcolor: 'primary.main' }}>
+                            {index + 1}
+                          </Avatar>
+                        </ListItemIcon>
+                        <ListItemText 
+                          primary={
+                            <Typography variant="body2">
+                              {rec}
+                            </Typography>
+                          }
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </CardContent>
+              </Card>
+            </Stack>
           </Grid>
         </Grid>
       )}
