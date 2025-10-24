@@ -65,17 +65,17 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 - **Custom CSV Upload**: Analyze your own peer data
 - **AI-Powered Comparison**: Automated tool selection by Claude
 
-### 📋 Financial Reports Analyzer
+### 📋 Financial Reports
 - **SEC Filings**: 10-K and 10-Q analysis for any public bank
 - **Document Upload**: Analyze your own financial PDFs
 - **Conversational Memory**: Context-aware across queries
 - **AI Chat**: Interactive Q&A about uploaded documents
 
-### 🔧 Analysis Modes
-1. **Live FDIC**: Real-time banking metrics from FDIC Call Reports
-2. **SEC EDGAR**: Direct integration with SEC.gov APIs
-3. **Document Upload**: PDF analysis with metadata extraction
-4. **Chat Mode**: Conversational analysis with memory
+### 🛡️ Compliance & Audit Dashboard
+- **Regulatory Risk Assessment**: Real-time compliance scoring using FDIC data
+- **Capital Adequacy Analysis**: Tier 1 capital ratios and regulatory thresholds
+- **Risk Temperature Gauges**: Visual risk indicators for capital, liquidity, and credit
+- **Regulatory Alerts**: Automated compliance monitoring and alerts
 
 
 ## 🎯 AI Agent Tools (12 Custom Tools)
