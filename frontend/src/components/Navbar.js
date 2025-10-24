@@ -78,6 +78,22 @@ const Navbar = () => {
           >
             📄 SEC Reports
           </Button>
+          <Button 
+            color="inherit" 
+            onClick={() => navigate('/compliance-audit')}
+            sx={{
+              px: 3,
+              py: 1,
+              borderRadius: 2,
+              fontWeight: 600,
+              background: location.pathname === '/compliance-audit' ? 'rgba(255,255,255,0.2)' : 'transparent',
+              '&:hover': {
+                background: 'rgba(255,255,255,0.15)'
+              }
+            }}
+          >
+            🛡️ Compliance
+          </Button>
         </Box>
       </Toolbar>
     </AppBar>

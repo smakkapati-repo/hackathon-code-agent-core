@@ -5,6 +5,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import SecurityIcon from '@mui/icons-material/Security';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { Amplify } from 'aws-amplify';
 import { fetchAuthSession, signOut, signInWithRedirect } from 'aws-amplify/auth';
@@ -13,6 +14,7 @@ import { cognitoConfig } from './config';
 import Home from './components/Home';
 import PeerAnalytics from './components/PeerAnalytics';
 import FinancialReports from './components/FinancialReports';
+import ComplianceAudit from './components/ComplianceAudit';
 import Login from './components/Login';
 
 // Configure Amplify v6
@@ -214,6 +216,7 @@ function App() {
             <Tab icon={<AccountBalanceIcon />} label="Home" />
             <Tab icon={<AnalyticsIcon />} label="Peer Analytics" />
             <Tab icon={<AssessmentIcon />} label="Financial Reports" />
+            <Tab icon={<SecurityIcon />} label="Compliance & Audit" />
           </Tabs>
         </AppBar>
         
@@ -226,6 +229,9 @@ function App() {
           </TabPanel>
           <TabPanel value={tabValue} index={2}>
             <FinancialReports />
+          </TabPanel>
+          <TabPanel value={tabValue} index={3}>
+            <ComplianceAudit />
           </TabPanel>
         </Container>
       </Box>
