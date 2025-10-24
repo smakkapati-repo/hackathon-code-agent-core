@@ -37,7 +37,7 @@ edge_attr = {
 }
 
 with Diagram(
-    "BankIQ+ Production Architecture - CloudFront + ECS + AgentCore",
+    "BankIQ+ Production Architecture - CloudFront + ECS + AgentCore + Compliance",
     show=False,
     direction="LR",
     graph_attr=graph_attr,
@@ -72,7 +72,7 @@ with Diagram(
             
             # Private Subnets
             with Cluster("Private Subnets - ECS Fargate", graph_attr={"bgcolor": "white", "style": "rounded"}):
-                ecs_backend = Fargate("Backend Container\nNode.js Express\n12 AI Tools\nJWT Verification")
+                ecs_backend = Fargate("Backend Container\nNode.js Express\n16 AI Tools\nJWT Verification")
             
             # Data Services
             with Cluster("Storage", graph_attr={"bgcolor": "white", "style": "rounded"}):
@@ -80,7 +80,7 @@ with Diagram(
         
         # AgentCore Runtime
         with Cluster("Bedrock AgentCore", graph_attr={"bgcolor": "white", "style": "rounded"}):
-            agentcore = Bedrock("AgentCore Runtime\nbank_iq_agent_v1\n12 Tools + Memory")
+            agentcore = Bedrock("AgentCore Runtime\nbank_iq_agent_v1\n16 Tools + Memory\nCompliance Analysis")
             claude = Bedrock("Claude Sonnet 4.5\nConversational AI")
             
         # CI/CD Pipeline
