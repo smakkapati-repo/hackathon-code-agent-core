@@ -74,28 +74,20 @@ else
 fi
 $PYTHON_CMD ${SCRIPT_DIR}/download-sec-filings.py
 
-# Run KB creation and agent deployment in parallel (no dependencies)
-echo -e "${YELLOW}Starting KB creation and agent deployment in parallel...${NC}"
-(
-  echo -e "${YELLOW}Creating Knowledge Base...${NC}"
-  $PYTHON_CMD ${SCRIPT_DIR}/deploy-knowledge-base.py
-  KB_ID=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?name=='bankiq-sec-filings-kb'].knowledgeBaseId" --output text)
-  echo "$KB_ID" > /tmp/knowledge_base_id.txt
-  echo -e "${GREEN}✅ KB created: $KB_ID${NC}"
-) &
+# Run KB creation first, then agent deployment (sequential for reliability)
+echo -e "${YELLOW}Creating Knowledge Base...${NC}"
+$PYTHON_CMD ${SCRIPT_DIR}/deploy-knowledge-base.py
+KB_ID=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?name=='bankiq-sec-filings-kb'].knowledgeBaseId" --output text)
+echo "$KB_ID" > /tmp/knowledge_base_id.txt
+echo -e "${GREEN}✅ KB created: $KB_ID${NC}"
 
-(
-  echo -e "${YELLOW}Deploying AgentCore Agent...${NC}"
-  ${SCRIPT_DIR}/deploy-agent.sh
-  echo -e "${GREEN}✅ Agent deployed${NC}"
-) &
-
-wait
-echo -e "${GREEN}✅ Agent and KB deployment complete${NC}"
+echo -e "${YELLOW}Deploying AgentCore Agent...${NC}"
+${SCRIPT_DIR}/deploy-agent.sh
 if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Phase 2 failed${NC}"
+    echo -e "${RED}❌ Agent deployment failed${NC}"
     exit 1
 fi
+echo -e "${GREEN}✅ Agent deployed${NC}"
 
 # Create and attach Bedrock Guardrails
 echo -e "${YELLOW}Creating Bedrock Guardrails...${NC}"
