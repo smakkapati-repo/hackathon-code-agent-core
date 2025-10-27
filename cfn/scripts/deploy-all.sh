@@ -88,6 +88,27 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Create and attach Bedrock Guardrails
+echo -e "${YELLOW}Creating Bedrock Guardrails...${NC}"
+GUARDRAIL_EXISTS=$(aws bedrock list-guardrails --region $REGION --query "guardrails[?name=='bankiq-guardrail'].id" --output text 2>/dev/null)
+if [ -z "$GUARDRAIL_EXISTS" ]; then
+  python3 ${SCRIPT_DIR}/create-bedrock-guardrail.py
+  if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ Guardrail created${NC}"
+    echo -e "${YELLOW}Attaching guardrail to agent...${NC}"
+    ${SCRIPT_DIR}/attach-guardrail-to-agent.sh
+    if [ $? -eq 0 ]; then
+      echo -e "${GREEN}✅ Guardrail attached to agent${NC}"
+    else
+      echo -e "${YELLOW}⚠️  Guardrail attachment failed (non-critical)${NC}"
+    fi
+  else
+    echo -e "${YELLOW}⚠️  Guardrail creation failed (non-critical)${NC}"
+  fi
+else
+  echo -e "${GREEN}✅ Guardrail already exists - skipping${NC}"
+fi
+
 KB_ID=$(cat /tmp/knowledge_base_id.txt 2>/dev/null || echo "pending")
 echo -e "${GREEN}✅ Phase 2 Complete! KB ID: $KB_ID${NC}\n"
 
