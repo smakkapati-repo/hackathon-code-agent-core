@@ -10,10 +10,10 @@
 ### Amazon Bedrock AgentCore + Strands Framework
 This is a **reference implementation** showcasing:
 - **Amazon Bedrock AgentCore** - AWS's newly launched managed agent runtime (announced October 2025)
-- **Strands Framework** - Python-based agent orchestration with 24 custom tools
+- **Strands Framework** - Python-based agent orchestration with 20 custom tools
 - **Production Architecture** - CloudFront + ECS + Cognito + AgentCore (no API Gateway)
 - **Conversational Memory** - Multi-turn conversations with context retention
-- **Tool Orchestration** - Claude Sonnet 4.5 automatically selects from 24 specialized tools
+- **Tool Orchestration** - Claude Sonnet 4.5 automatically selects from 20 specialized tools
 - **Enterprise Security** - Bedrock Guardrails, JWT authentication, IAM roles, private subnets
 
 ### Banking Analytics Use Case
@@ -31,7 +31,7 @@ The AI agent can instantly correlate a bank's declining Net Interest Margin with
 
 BankIQ+ follows a modern, cloud-native architecture built on AWS services with security-first design. User requests flow through [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) for global content delivery, routing static files from [S3](https://docs.aws.amazon.com/s3/) and API calls to the [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html). The ALB distributes traffic to containerized applications running on [Amazon ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), eliminating server management while providing automatic scaling.
 
-The platform's intelligence comes from [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/), which orchestrates 24 specialized tools for banking analytics. The agent uses [Claude Sonnet 4.5](https://www.anthropic.com/claude) for natural language understanding and maintains conversational memory across sessions. External data integration includes FDIC APIs for real-time banking metrics and SEC EDGAR APIs for financial filings. Documents uploaded to S3 are analyzed using PyPDF2 for metadata extraction and Claude for comprehensive analysis.
+The platform's intelligence comes from [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/), which orchestrates 20 specialized tools for banking analytics. The agent uses [Claude Sonnet 4.5](https://www.anthropic.com/claude) for natural language understanding and maintains conversational memory across sessions. External data integration includes FDIC APIs for real-time banking metrics and SEC EDGAR APIs for financial filings. Documents uploaded to S3 are analyzed using PyPDF2 for metadata extraction and Claude for comprehensive analysis.
 
 Security is embedded throughout: [AWS Cognito](https://docs.aws.amazon.com/cognito/) provides enterprise-grade authentication with OAuth 2.0 and JWT tokens, [Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) filter harmful content and block inappropriate requests, Fargate containers run in private subnets with JWT verification, [IAM roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) provide fine-grained access control, and [CloudWatch](https://docs.aws.amazon.com/cloudwatch/) enables comprehensive monitoring. The architecture eliminates API Gateway's 30-second timeout limitation, supporting long-running queries up to 300 seconds. Infrastructure is deployed through [CloudFormation](https://docs.aws.amazon.com/cloudformation/) templates, ensuring consistent, repeatable deployments.
 
@@ -336,7 +336,7 @@ export AWS_DEFAULT_REGION=us-east-1  # or your preferred region
 - 🔵 **[2/4] Agent + RAG** (~10-15 minutes, parallel execution)
   - Downloads 40 SEC filings (top 10 banks)
   - Creates Bedrock Knowledge Base + starts ingestion
-  - Builds and deploys Python agent with 24 tools
+  - Builds and deploys Python agent with 20 tools
   - Adds S3 permissions automatically
   - Creates conversational memory
 
