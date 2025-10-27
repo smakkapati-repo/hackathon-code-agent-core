@@ -14,7 +14,7 @@ This is a **reference implementation** showcasing:
 - **Production Architecture** - CloudFront + ECS + Cognito + AgentCore (no API Gateway)
 - **Conversational Memory** - Multi-turn conversations with context retention
 - **Tool Orchestration** - Claude Sonnet 4.5 automatically selects from 24 specialized tools
-- **Enterprise Security** - JWT authentication, IAM roles, private subnets
+- **Enterprise Security** - Bedrock Guardrails, JWT authentication, IAM roles, private subnets
 
 ### Banking Analytics Use Case
 The advent of Generative AI has revolutionized how financial institutions process and interpret complex banking data. BankIQ+ represents a paradigm shift from traditional rule-based analytics to intelligent, context-aware financial analysis. By integrating Amazon Bedrock AgentCore with Claude Sonnet 4.5, real-time FDIC data, and SEC EDGAR filings, the platform doesn't just present numbers—it understands relationships between metrics, identifies emerging trends, and generates human-like insights.
@@ -33,12 +33,13 @@ BankIQ+ follows a modern, cloud-native architecture built on AWS services with s
 
 The platform's intelligence comes from [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/), which orchestrates 24 specialized tools for banking analytics. The agent uses [Claude Sonnet 4.5](https://www.anthropic.com/claude) for natural language understanding and maintains conversational memory across sessions. External data integration includes FDIC APIs for real-time banking metrics and SEC EDGAR APIs for financial filings. Documents uploaded to S3 are analyzed using PyPDF2 for metadata extraction and Claude for comprehensive analysis.
 
-Security is embedded throughout: [AWS Cognito](https://docs.aws.amazon.com/cognito/) provides enterprise-grade authentication with OAuth 2.0 and JWT tokens, Fargate containers run in private subnets with JWT verification, [IAM roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) provide fine-grained access control, and [CloudWatch](https://docs.aws.amazon.com/cloudwatch/) enables comprehensive monitoring. The architecture eliminates API Gateway's 30-second timeout limitation, supporting long-running queries up to 300 seconds. Infrastructure is deployed through [CloudFormation](https://docs.aws.amazon.com/cloudformation/) templates, ensuring consistent, repeatable deployments.
+Security is embedded throughout: [AWS Cognito](https://docs.aws.amazon.com/cognito/) provides enterprise-grade authentication with OAuth 2.0 and JWT tokens, [Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) filter harmful content and block inappropriate requests, Fargate containers run in private subnets with JWT verification, [IAM roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) provide fine-grained access control, and [CloudWatch](https://docs.aws.amazon.com/cloudwatch/) enables comprehensive monitoring. The architecture eliminates API Gateway's 30-second timeout limitation, supporting long-running queries up to 300 seconds. Infrastructure is deployed through [CloudFormation](https://docs.aws.amazon.com/cloudformation/) templates, ensuring consistent, repeatable deployments.
 
 ## 🛠️ Technology Stack
 
 ### Core AI Platform (NEW AWS Services)
 - **[Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/)** - Managed agent runtime with built-in memory and tool orchestration
+- **[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)** - Content filtering, topic blocking, and PII protection
 - **[Strands Framework](https://github.com/awslabs/agents-for-amazon-bedrock-sample-code)** - Python agent framework for defining tools and workflows
 - **[Claude Sonnet 4.5](https://www.anthropic.com/claude)** - Foundation model for natural language understanding and reasoning
 
@@ -48,7 +49,7 @@ Security is embedded throughout: [AWS Cognito](https://docs.aws.amazon.com/cogni
 - **Frontend**: [React](https://react.dev/) + [Material-UI](https://mui.com/) + AWS Amplify Auth
 - **Infrastructure**: [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), [ALB](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/), [CloudFront](https://docs.aws.amazon.com/cloudfront/), [S3](https://docs.aws.amazon.com/s3/)
 - **Vector Store**: [OpenSearch Serverless](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless.html) (for RAG knowledge base)
-- **Security**: [VPC](https://docs.aws.amazon.com/vpc/) private subnets, JWT verification, [IAM roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html), [Security Groups](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html)
+- **Security**: [Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html), [VPC](https://docs.aws.amazon.com/vpc/) private subnets, JWT verification, [IAM roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html), [Security Groups](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html)
 
 ## 📚 Documentation
 
@@ -146,6 +147,59 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 
 See [RAG Integration Guide](docs/RAG_INTEGRATION.md) for details.
 
+## 🛡️ Bedrock Guardrails (Content Safety)
+
+BankIQ+ uses **Amazon Bedrock Guardrails** to ensure safe, compliant AI interactions:
+
+### Protection Layers
+
+**Content Filtering:**
+- ✅ Hate speech, insults, violence (HIGH strength)
+- ✅ Sexual content, misconduct (MEDIUM-HIGH strength)
+- ✅ Prompt injection attacks (HIGH strength)
+
+**Topic Blocking:**
+- 🚫 **Financial Advice** - No investment recommendations or stock picks
+- 🚫 **Legal Advice** - No legal counsel or regulatory interpretation
+- 🚫 **Tax Advice** - No tax planning or optimization strategies
+- 🚫 **Personal Finance** - No budgeting or debt management advice
+
+**Word Filtering:**
+- Blocks phrases like "buy this stock", "guaranteed returns", "risk-free investment"
+- Filters profanity using AWS managed word lists
+
+**PII Protection:**
+- 🔒 **BLOCK**: SSN, credit cards, bank accounts, routing numbers
+- 🔒 **ANONYMIZE**: Email, phone, names, addresses
+
+### Custom Messaging
+**Blocked Input:** "I can only provide banking data analysis. I cannot provide financial advice, investment recommendations, or discuss inappropriate topics."
+
+**Blocked Output:** "I cannot provide that type of information. I can only assist with factual banking data analysis and metrics."
+
+### Enable Guardrails
+
+Guardrails are **optional** and can be enabled post-deployment:
+
+```bash
+# Create guardrail
+python3 cfn/scripts/create-bedrock-guardrail.py
+
+# Update agent configuration (add to backend/.bedrock_agentcore.yaml)
+guardrail:
+  identifier: <guardrail-id>
+  version: '1'
+
+# Redeploy agent
+cd backend && agentcore launch
+```
+
+**Test Guardrail:**
+```bash
+agentcore invoke '{"prompt": "Should I buy JPMorgan stock?"}'
+# Expected: Blocked with custom message
+```
+
 ## 🌟 Amazon Bedrock AgentCore Highlights
 
 ### What is AgentCore?
@@ -153,6 +207,7 @@ Amazon Bedrock AgentCore is a **managed agent runtime** that handles:
 - ✅ **Tool Orchestration** - Automatically routes requests to the right tools
 - ✅ **Conversational Memory** - Maintains context across multi-turn conversations
 - ✅ **Streaming Responses** - Real-time token streaming for better UX
+- ✅ **Content Safety** - Bedrock Guardrails for harmful content filtering
 - ✅ **Error Handling** - Automatic retries and graceful degradation
 - ✅ **Observability** - Built-in CloudWatch logging and tracing
 - ✅ **Scalability** - Serverless, auto-scaling infrastructure
