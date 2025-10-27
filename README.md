@@ -81,7 +81,7 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 - **Regulatory Alerts**: Automated compliance monitoring and alerts
 
 
-## 🎯 AI Agent Tools (24 Custom Tools + RAG)
+## 🎯 AI Agent Tools (20 Custom Tools + RAG)
 
 **Strands Framework Implementation** - Each tool is a Python function with:
 - Input/output schemas (Pydantic models)
@@ -89,50 +89,47 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 - Integration with external APIs (FDIC, SEC EDGAR)
 - S3 operations for document storage
 
-**FDIC & Live Data (3):**
+**FDIC & Live Data (4):**
 1. `get_fdic_data` - Current FDIC banking data (live API integration)
-2. `search_fdic_bank` - Search FDIC by bank name
-3. `compare_banks_live_fdic` - Live FDIC peer comparison
+2. `get_bank_fdic_data` - Get FDIC data for specific bank
+3. `search_fdic_bank` - Search FDIC by bank name
+4. `compare_banks_live_fdic` - Live FDIC peer comparison
 
 **Peer Comparison (2):**
-4. `compare_banks_local_csv` - Compare banks using uploaded CSV
-5. `compare_banks` - Smart router (auto-selects live/local/RAG)
+5. `compare_banks_local_csv` - Compare banks using uploaded CSV
+6. `compare_banks` - Smart router (auto-selects live/local/RAG)
 
 **SEC Filings & Search (2):**
-6. `get_sec_filings` - SEC EDGAR filings (10-K, 10-Q)
-7. `search_banks` - Bank search by name/ticker (500+ banks)
-
-**Report Generation (4):**
-8. `generate_bank_report` - General comprehensive report
-9. `generate_live_sec_report` - Live SEC filing analysis
-10. `generate_rag_indexed_report` - RAG pre-indexed report
-11. `generate_local_document_report` - Uploaded document report
-
-**Chat & Q&A (4):**
-12. `answer_banking_question` - General Q&A with context
-13. `chat_with_live_filings` - Chat about live SEC filings
-14. `chat_with_rag_knowledge_base` - Chat with RAG indexed data
-15. `chat_with_local_documents` - Chat about uploaded documents
+7. `get_sec_filings` - SEC EDGAR filings (10-K, 10-Q)
+8. `search_banks` - Bank search by name/ticker (500+ banks)
 
 **CSV Upload & Analysis (3):**
-16. `upload_peer_csv_data` - Upload peer comparison CSV
-17. `upload_csv_to_s3` - Direct S3 CSV upload
-18. `analyze_csv_peer_performance` - Analyze custom CSV data
+9. `upload_peer_csv_data` - Upload peer comparison CSV
+10. `upload_csv_to_s3` - Direct S3 CSV upload
+11. `analyze_csv_peer_performance` - Analyze custom CSV data
 
 **PDF Upload & Analysis (3):**
-19. `analyze_and_upload_pdf` - Upload and analyze PDFs (PyPDF2 + Claude)
-20. `upload_document_to_s3` - Direct S3 document upload
-21. `analyze_uploaded_pdf` - Analyze PDFs already in S3
+12. `analyze_and_upload_pdf` - Upload and analyze PDFs (PyPDF2 + Claude)
+13. `upload_document_to_s3` - Direct S3 document upload
+14. `extract_pdf_text` - Extract text from PDFs
+
+**Data Retrieval (2):**
+15. `get_local_document_data` - Get uploaded document data
+16. `get_rag_data` - Get RAG knowledge base data
 
 **Compliance & Audit (3):**
-22. `compliance_risk_assessment` - Real-time compliance scoring
-23. `regulatory_alerts_monitor` - Monitor regulatory thresholds
-24. `audit_document_analyzer` - Analyze audit findings and compliance
+17. `compliance_risk_assessment` - Real-time compliance scoring
+18. `regulatory_alerts_monitor` - Monitor regulatory thresholds
+19. `audit_document_analyzer` - Analyze audit findings and compliance
+
+**RAG Knowledge Base (1):**
+20. `query_rag_knowledge_base` - Query Bedrock Knowledge Base with semantic search
 
 **Tool Orchestration**: Claude Sonnet 4.5 automatically selects the right tool(s) based on user intent. For example:
 - "Compare JPMorgan and Bank of America ROA" → `compare_banks` tool
-- "What are Webster's key risks?" → `get_sec_filings` + `chat_with_documents` tools
+- "What are Webster's key risks?" → `get_sec_filings` + `query_rag_knowledge_base` tools
 - "Analyze my custom peer data" → `upload_csv_to_s3` + `analyze_csv_peer_performance` tools
+- "Show me compliance risks for Chase" → `get_bank_fdic_data` + `compliance_risk_assessment` tools
 
 ### 🧠 RAG Mode (Included)
 **Bedrock Knowledge Base** with pre-indexed SEC filings:
