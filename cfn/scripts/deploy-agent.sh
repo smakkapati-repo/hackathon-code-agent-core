@@ -93,9 +93,15 @@ fi
 # Always configure AgentCore fresh (handles first run and re-runs)
 echo "🔧 Configuring AgentCore agent..."
 
-# Use printf with explicit empty lines for each prompt to avoid input reuse bug
-# Prompts: agent_name, execution_role, ecr_repo, dependency_file, oauth, headers, memory
-printf "bank_iq_agent\n\n\n\n\n\n\n" | agentcore configure --entrypoint bank_iq_agent.py
+# Detect OS and use appropriate input method
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+    # Windows (Git Bash/MSYS/Cygwin) - use echo with explicit newlines
+    echo "Detected Windows environment - using Windows-compatible input method"
+    (echo "bank_iq_agent"; echo ""; echo ""; echo ""; echo ""; echo ""; echo "") | agentcore configure --entrypoint bank_iq_agent.py
+else
+    # Mac/Linux - use printf
+    printf "bank_iq_agent\n\n\n\n\n\n\n" | agentcore configure --entrypoint bank_iq_agent.py
+fi
 
 # Verify the config was created with auto-create enabled
 if [ -f .bedrock_agentcore.yaml ]; then

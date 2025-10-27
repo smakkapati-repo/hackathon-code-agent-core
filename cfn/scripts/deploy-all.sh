@@ -63,13 +63,22 @@ echo -e "${BLUE}│${NC} ${GREEN}[2/4]${NC} ${CYAN}Deploying Agent + RAG Knowled
 echo -e "${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
 
 echo -e "${YELLOW}Downloading SEC filings (40 files)...${NC}"
-python3 ${SCRIPT_DIR}/download-sec-filings.py
+# Detect Python command (python3 on Mac/Linux, python on Windows)
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+else
+    echo -e "${RED}ERROR: Python not found. Please install Python 3.10+${NC}"
+    exit 1
+fi
+$PYTHON_CMD ${SCRIPT_DIR}/download-sec-filings.py
 
 # Run KB creation and agent deployment in parallel (no dependencies)
 echo -e "${YELLOW}Starting KB creation and agent deployment in parallel...${NC}"
 (
   echo -e "${YELLOW}Creating Knowledge Base...${NC}"
-  python3 ${SCRIPT_DIR}/deploy-knowledge-base.py
+  $PYTHON_CMD ${SCRIPT_DIR}/deploy-knowledge-base.py
   KB_ID=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?name=='bankiq-sec-filings-kb'].knowledgeBaseId" --output text)
   echo "$KB_ID" > /tmp/knowledge_base_id.txt
   echo -e "${GREEN}✅ KB created: $KB_ID${NC}"
@@ -92,7 +101,7 @@ fi
 echo -e "${YELLOW}Creating Bedrock Guardrails...${NC}"
 GUARDRAIL_EXISTS=$(aws bedrock list-guardrails --region $REGION --query "guardrails[?name=='bankiq-guardrail'].id" --output text 2>/dev/null)
 if [ -z "$GUARDRAIL_EXISTS" ]; then
-  python3 ${SCRIPT_DIR}/create-bedrock-guardrail.py
+  $PYTHON_CMD ${SCRIPT_DIR}/create-bedrock-guardrail.py
   if [ $? -eq 0 ]; then
     echo -e "${GREEN}✅ Guardrail created${NC}"
     echo -e "${YELLOW}Attaching guardrail to agent...${NC}"
