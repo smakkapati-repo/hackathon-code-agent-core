@@ -138,7 +138,7 @@ function Home() {
           Technology Stack
         </Typography>
         <Grid container spacing={1} justifyContent="center">
-          {['AWS Bedrock AgentCore', 'Claude Sonnet 4.5', 'Strands Framework', 'Express.js', 'ECS Fargate', 'FDIC API', 'SEC EDGAR', 'React', 'Material-UI'].map((tech) => (
+          {['AWS Bedrock AgentCore', 'Claude Sonnet 4.5', 'OpenSearch Serverless', 'Strands Framework', 'Express.js', 'ECS Fargate', 'FDIC API', 'SEC EDGAR', 'React', 'Material-UI'].map((tech) => (
             <Grid item key={tech}>
               <Chip 
                 label={tech} 

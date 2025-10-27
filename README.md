@@ -47,6 +47,7 @@ Security is embedded throughout: [AWS Cognito](https://docs.aws.amazon.com/cogni
 - **Backend**: [Express.js](https://expressjs.com/) (Node.js) + Python agent
 - **Frontend**: [React](https://react.dev/) + [Material-UI](https://mui.com/) + AWS Amplify Auth
 - **Infrastructure**: [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), [ALB](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/), [CloudFront](https://docs.aws.amazon.com/cloudfront/), [S3](https://docs.aws.amazon.com/s3/)
+- **Vector Store**: [OpenSearch Serverless](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless.html) (for RAG knowledge base)
 - **Security**: [VPC](https://docs.aws.amazon.com/vpc/) private subnets, JWT verification, [IAM roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html), [Security Groups](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html)
 
 ## 📚 Documentation
@@ -260,7 +261,7 @@ cd amzon-bedrock-agentcore-bank-analytics
   - ECS cluster
   - S3 buckets (frontend, uploaded-docs, sec-filings)
   - ECR repositories
-  - OpenSearch Serverless collection
+  - OpenSearch Serverless collection (vector store for RAG)
   - IAM roles (ECS, AgentCore, Bedrock KB)
 
 - 🔵 **[2/4] Agent + RAG** (~10-15 minutes, parallel execution)

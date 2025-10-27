@@ -4,6 +4,7 @@ from diagrams.aws.devtools import Codebuild
 from diagrams.aws.network import InternetGateway, ElasticLoadBalancing, VPC, CloudFront
 from diagrams.aws.storage import S3
 from diagrams.aws.ml import Bedrock
+from diagrams.aws.analytics import AmazonOpensearchService
 from diagrams.aws.management import Cloudwatch
 from diagrams.aws.security import IAM, Cognito
 from diagrams.aws.general import User
@@ -79,9 +80,10 @@ with Diagram(
                 s3_docs = S3("S3 Bucket\nUploaded Documents")
         
         # AgentCore Runtime
-        with Cluster("Bedrock AgentCore", graph_attr={"bgcolor": "white", "style": "rounded"}):
-            agentcore = Bedrock("AgentCore Runtime\nbank_iq_agent_v1\n16 Tools + Memory\nCompliance Analysis")
+        with Cluster("Bedrock AgentCore + RAG", graph_attr={"bgcolor": "white", "style": "rounded"}):
+            agentcore = Bedrock("AgentCore Runtime\nbank_iq_agent\n24 Tools + Memory\nCompliance Analysis")
             claude = Bedrock("Claude Sonnet 4.5\nConversational AI")
+            opensearch = AmazonOpensearchService("OpenSearch Serverless\nVector Store\nRAG Knowledge Base")
             
         # CI/CD Pipeline
         with Cluster("CI/CD Pipeline", graph_attr={"bgcolor": "white", "style": "rounded"}):
@@ -117,6 +119,9 @@ with Diagram(
     
     # Step 7: AgentCore to Claude
     agentcore >> Edge(label="6. AI Analysis\nBank Performance\nCompliance Scoring", color="#E91E63") >> claude
+    
+    # Step 7b: AgentCore to OpenSearch (RAG)
+    agentcore >> Edge(label="RAG Query\nVector Search", color="#E91E63", style="dashed") >> opensearch
     
     # Step 8: Document Storage
     ecs_backend >> Edge(label="7. Upload Docs", color="#FF9800") >> s3_docs

@@ -479,6 +479,14 @@ if [ -n "$DOCS_BUCKET" ]; then
   echo "✅ Docs bucket deleted"
 fi
 
+# Delete SEC filings bucket explicitly
+SEC_FILINGS_BUCKET=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-infra --region $REGION --query 'Stacks[0].Outputs[?OutputKey==`SECFilingsBucketName`].OutputValue' --output text 2>/dev/null || echo "")
+if [ -n "$SEC_FILINGS_BUCKET" ]; then
+  echo -e "${YELLOW}🗑️  Deleting SEC filings S3 bucket: $SEC_FILINGS_BUCKET${NC}"
+  delete_bucket_with_versions $SEC_FILINGS_BUCKET
+  echo "✅ SEC filings bucket deleted"
+fi
+
 # Fallback: Find and delete any remaining bankiq S3 buckets
 echo -e "${YELLOW}🔍 Checking for any remaining ${STACK_NAME} S3 buckets...${NC}"
 REMAINING_BUCKETS=$(aws s3 ls --region $REGION | grep "${STACK_NAME}" | awk '{print $3}' || echo "")
