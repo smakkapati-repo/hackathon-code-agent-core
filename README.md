@@ -289,16 +289,12 @@ git clone https://github.com/smakkapati-repo/hackathon-code-agent-core.git
 cd hackathon-code-agent-core
 ```
 
-
-
 **Step 2: Configure AWS CLI**
-
-**Mac/Linux/Windows:**
 ```bash
 aws configure
 # Enter your AWS Access Key ID
 # Enter your AWS Secret Access Key
-# Enter region: (choose your preferred region, e.g., us-east-1, us-west-2, eu-west-1)
+# Enter region: us-east-1 (or your preferred region: us-west-2, eu-west-1, etc.)
 # Enter output format: json
 ```
 
@@ -306,19 +302,24 @@ aws configure
 
 **Mac/Linux:**
 ```bash
-cd hackathon-code-agent-core
 ./cfn/scripts/deploy-all.sh
-# RAG Knowledge Base is automatically deployed
 ```
 
 **Windows (Git Bash):**
 ```bash
-cd hackathon-code-agent-core
 # Set region explicitly (required for Windows Git Bash)
 export AWS_DEFAULT_REGION=us-east-1  # or your preferred region
 ./cfn/scripts/deploy-all.sh
-# RAG Knowledge Base is automatically deployed
 ```
+
+**Note:** The deployment automatically:
+- Creates Cognito User Pool for authentication
+- Deploys infrastructure (VPC, ALB, ECS, S3, ECR)
+- Downloads 40 SEC filings and creates RAG Knowledge Base
+- Deploys AgentCore agent with 20 tools
+- Creates and attaches Bedrock Guardrails
+- Builds and deploys backend container
+- Builds and deploys frontend to S3 + CloudFront
 
 **Deployment Progress:**
 - 🔵 **[0/4] Auth (Cognito)** (~2-3 minutes)
@@ -438,10 +439,8 @@ Monthly costs (24/7 operation):
 
 To delete all resources:
 
-**Mac/Linux/Windows:**
 ```bash
-# IMPORTANT: Run from project root directory
-cd hackathon-code-agent-core
+# Run from project root directory
 ./cfn/scripts/cleanup.sh
 ```
 
@@ -459,13 +458,13 @@ This will remove:
 
 ## 📝 Monitoring
 
-**All Platforms:**
 ```bash
 # View ECS logs
 aws logs tail /ecs/bankiq-backend --follow
 
-# View AgentCore logs (run from backend directory)
-cd backend && agentcore status
+# View AgentCore logs
+cd backend
+agentcore status
 ```
 
 
