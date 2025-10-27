@@ -11,7 +11,8 @@
 This is a **reference implementation** showcasing:
 - **Amazon Bedrock AgentCore** - AWS's newly launched managed agent runtime (announced October 2025)
 - **Strands Framework** - Python-based agent orchestration with 20 custom tools
-- **Production Architecture** - CloudFront + ECS + Cognito + AgentCore (no API Gateway)
+- **Production Architecture** - CloudFront + ECS + Cognito + AgentCore + OpenSearch Serverless (no API Gateway)
+- **RAG Knowledge Base** - Bedrock Knowledge Base with OpenSearch Serverless vector store
 - **Conversational Memory** - Multi-turn conversations with context retention
 - **Tool Orchestration** - Claude Sonnet 4.5 automatically selects from 20 specialized tools
 - **Enterprise Security** - Bedrock Guardrails, JWT authentication, IAM roles, private subnets
