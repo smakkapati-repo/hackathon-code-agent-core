@@ -278,8 +278,8 @@ source ~/.bashrc
 
 **Step 1: Clone Repository**
 ```bash
-git clone https://github.com/smakkapati-repo/amzon-bedrock-agentcore-bank-analytics.git
-cd amzon-bedrock-agentcore-bank-analytics
+git clone https://github.com/smakkapati-repo/hackathon-code-agent-core.git
+cd hackathon-code-agent-core
 ```
 
 
@@ -299,7 +299,7 @@ aws configure
 
 **Mac/Linux/Windows:**
 ```bash
-cd amzon-bedrock-agentcore-bank-analytics
+cd hackathon-code-agent-core
 ./cfn/scripts/deploy-all.sh
 # RAG Knowledge Base is automatically deployed
 ```
@@ -425,7 +425,7 @@ To delete all resources:
 **Mac/Linux/Windows:**
 ```bash
 # IMPORTANT: Run from project root directory
-cd amzon-bedrock-agentcore-bank-analytics
+cd hackathon-code-agent-core
 ./cfn/scripts/cleanup.sh
 ```
 
