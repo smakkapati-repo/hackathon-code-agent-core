@@ -177,27 +177,30 @@ BankIQ+ uses **Amazon Bedrock Guardrails** to ensure safe, compliant AI interact
 
 **Blocked Output:** "I cannot provide that type of information. I can only assist with factual banking data analysis and metrics."
 
-### Enable Guardrails
+### Guardrails Status
 
-Guardrails are **optional** and can be enabled post-deployment:
+Guardrails are **automatically deployed** during the main deployment process:
 
-```bash
-# Create guardrail
-python3 cfn/scripts/create-bedrock-guardrail.py
-
-# Update agent configuration (add to backend/.bedrock_agentcore.yaml)
-guardrail:
-  identifier: <guardrail-id>
-  version: '1'
-
-# Redeploy agent
-cd backend && agentcore launch
-```
+✅ **Auto-Deployed**: The deploy-all.sh script automatically:
+1. Creates the Bedrock Guardrail with content filtering, topic blocking, and PII protection
+2. Attaches the guardrail to the AgentCore agent
+3. Configures all security policies
 
 **Test Guardrail:**
 ```bash
+cd backend
 agentcore invoke '{"prompt": "Should I buy JPMorgan stock?"}'
 # Expected: Blocked with custom message
+```
+
+**Manual Management (Optional):**
+If you need to recreate or update guardrails:
+```bash
+# Recreate guardrail
+python3 cfn/scripts/create-bedrock-guardrail.py
+
+# Reattach to agent
+bash cfn/scripts/attach-guardrail-to-agent.sh
 ```
 
 ## 🌟 Amazon Bedrock AgentCore Highlights
