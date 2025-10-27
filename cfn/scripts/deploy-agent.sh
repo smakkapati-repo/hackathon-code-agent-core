@@ -27,13 +27,67 @@ if ! aws cloudformation describe-stacks --stack-name ${STACK_NAME:-bankiq}-infra
     exit 1
 fi
 
-# Use IAM role from infrastructure stack instead of creating new one
-echo "Using IAM role from infrastructure stack..."
+# Ensure AgentCore execution role exists
+ROLE_NAME="AmazonBedrockAgentCoreSDKRuntime-${AWS_DEFAULT_REGION}-${STACK_NAME:-bankiq}"
+ROLE_ARN="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$ROLE_NAME"
 
-# IAM roles are managed by infrastructure stack
-
-echo "Waiting for IAM role propagation..."
-sleep 10
+echo "Checking if AgentCore execution role exists: $ROLE_NAME"
+if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+    echo "Creating AgentCore execution role..."
+    
+    # Create trust policy
+    cat > /tmp/agentcore-trust.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "bedrock-agentcore.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+    
+    # Create role
+    aws iam create-role \
+        --role-name "$ROLE_NAME" \
+        --assume-role-policy-document file:///tmp/agentcore-trust.json \
+        --description "Execution role for BankIQ AgentCore" >/dev/null
+    
+    # Attach policies
+    aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+    aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
+    
+    # Add ECR permissions
+    cat > /tmp/ecr-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchCheckLayerAvailability"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+    
+    aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name ECRAccessPolicy --policy-document file:///tmp/ecr-policy.json
+    
+    echo "✅ AgentCore execution role created: $ROLE_ARN"
+    echo "Waiting for IAM role propagation..."
+    sleep 15
+else
+    echo "✅ AgentCore execution role already exists"
+fi
 
 # Check if config exists, if not create it
 # Always configure AgentCore fresh (handles first run and re-runs)
@@ -41,7 +95,7 @@ echo "🔧 Configuring AgentCore agent..."
 
 # Use printf with explicit empty lines for each prompt to avoid input reuse bug
 # Prompts: agent_name, execution_role, ecr_repo, dependency_file, oauth, headers, memory
-printf "bank_iq_agent_v1\n\n\n\n\n\n\n" | agentcore configure --entrypoint bank_iq_agent_v1.py
+printf "bank_iq_agent\n\n\n\n\n\n\n" | agentcore configure --entrypoint bank_iq_agent.py
 
 # Verify the config was created with auto-create enabled
 if [ -f .bedrock_agentcore.yaml ]; then
@@ -62,31 +116,47 @@ fi
 
 echo "✅ AgentCore configured"
 
-# Check if agent already exists
+# Check if agent already exists AND has endpoint deployed
 echo "Checking agent status..."
 AGENT_ARN=""
+ENDPOINT_STATUS=""
 
-# Try to get ARN from agentcore status first
+# Try to get ARN and endpoint status from agentcore status
 if agentcore status 2>/dev/null | grep -q "Agent ARN:"; then
     AGENT_ARN=$(agentcore status 2>/dev/null | grep "Agent ARN:" -A 1 | tail -1 | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/│//g')
-    echo "✅ Found existing agent: $AGENT_ARN"
+    ENDPOINT_STATUS=$(agentcore status 2>/dev/null | grep "Endpoint:" | sed 's/.*Endpoint: *//' | sed 's/ .*//')
+    
+    if [ "$ENDPOINT_STATUS" = "DEFAULT" ] && ! agentcore status 2>/dev/null | grep -q "Unknown"; then
+        echo "✅ Found existing agent with active endpoint: $AGENT_ARN"
+    else
+        echo "⚠️  Found agent but endpoint not deployed: $AGENT_ARN"
+        echo "Launching endpoint..."
+        TEMP_LOG="${SCRIPT_DIR}/temp/agent_deploy.log"
+        mkdir -p "${SCRIPT_DIR}/temp"
+        PYTHONIOENCODING=utf-8 agentcore launch -a bank_iq_agent --auto-update-on-conflict 2>&1 | tee "$TEMP_LOG"
+        
+        # Get new ARN after launch
+        sleep 10
+        AGENT_ARN=$(grep -oE 'arn:aws:bedrock-agentcore:[^[:space:]]+:runtime/bank_iq_agent-[a-zA-Z0-9]+' "$TEMP_LOG" | head -1)
+        echo "✅ Agent endpoint deployed: $AGENT_ARN"
+    fi
 else
     # Deploy new agent
     echo "Deploying new agent..."
     TEMP_LOG="${SCRIPT_DIR}/temp/agent_deploy.log"
     mkdir -p "${SCRIPT_DIR}/temp"
-    PYTHONIOENCODING=utf-8 agentcore launch -a bank_iq_agent_v1 --auto-update-on-conflict 2>&1 | tee "$TEMP_LOG"
+    PYTHONIOENCODING=utf-8 agentcore launch -a bank_iq_agent --auto-update-on-conflict 2>&1 | tee "$TEMP_LOG"
     
     # Wait for deployment to complete and config to update
     sleep 10
     
     # Get agent ARN from deployment output (most reliable)
-    AGENT_ARN=$(grep -oE 'arn:aws:bedrock-agentcore:[^[:space:]]+:runtime/bank_iq_agent_v1-[a-zA-Z0-9]+' "$TEMP_LOG" | head -1)
+    AGENT_ARN=$(grep -oE 'arn:aws:bedrock-agentcore:[^[:space:]]+:runtime/bank_iq_agent-[a-zA-Z0-9]+' "$TEMP_LOG" | head -1)
     if [ -n "$AGENT_ARN" ]; then
         echo "✅ Agent ARN from deployment log: $AGENT_ARN"
     else
         # Fallback: extract from deployment log
-        AGENT_ARN=$(grep -oE 'arn:aws:bedrock-agentcore:[^[:space:]]+:runtime/bank_iq_agent_v1-[a-zA-Z0-9]+' "$TEMP_LOG" | head -1)
+        AGENT_ARN=$(grep -oE 'arn:aws:bedrock-agentcore:[^[:space:]]+:runtime/bank_iq_agent-[a-zA-Z0-9]+' "$TEMP_LOG" | head -1)
         echo "✅ Agent ARN from log: $AGENT_ARN"
     fi
 fi

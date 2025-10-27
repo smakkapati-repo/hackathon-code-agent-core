@@ -283,10 +283,10 @@ class AgentService {
   // Simple message sending for compatibility
   async sendMessage(message) {
     try {
-      const response = await fetch(`${this.baseURL}/api/chat`, {
+      const response = await fetch(`${this.baseURL}/api/agent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: message })
+        body: JSON.stringify({ prompt: message })
       });
       
       if (!response.ok) {
@@ -294,7 +294,7 @@ class AgentService {
       }
       
       const result = await response.json();
-      return result.response || result.message || 'No response';
+      return result.output || result.response || result.message || 'No response';
     } catch (error) {
       console.error('Send message error:', error);
       throw error;

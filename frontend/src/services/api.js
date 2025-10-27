@@ -24,6 +24,16 @@ async function getAuthHeaders() {
 
 export const api = {
   async getSECReports(bankName, year, useRag, cik) {
+    // RAG mode: Get pre-indexed filings from S3
+    if (useRag) {
+      const response = await fetch(`${BACKEND_URL}/api/get-rag-filings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bankName })
+      });
+      return await response.json();
+    }
+    
     // Use direct backend endpoint for faster, more reliable SEC filings
     if (cik && cik !== '0000000000') {
       try {
@@ -375,18 +385,9 @@ Your detailed analysis here...`;
     if (analyzedDocs && analyzedDocs.length > 0) {
       const doc = analyzedDocs[0];
       if (doc.s3_key) {
-        // Use the chat_with_documents tool for Q&A (not analyze_uploaded_pdf which is for full reports)
-        prompt = `Use the chat_with_documents tool to answer this question about the uploaded document.
+        prompt = `Answer this question about ${doc.bank_name}'s ${doc.form_type} filing: ${message}
 
-Question: "${message}"
-
-Document details:
-- s3_key: "${doc.s3_key}"
-- bank_name: "${doc.bank_name}"
-- form_type: "${doc.form_type}"
-- year: ${doc.year}
-
-Call chat_with_documents with these parameters to get the answer from the document.`;
+IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.bank_name}") to retrieve the document data, then provide a 3-4 paragraph professional analysis.`;
       } else {
         prompt = `Answer this question about ${doc.bank_name} ${doc.form_type} ${doc.year}: ${message}`;
       }
@@ -432,6 +433,63 @@ Call chat_with_documents with these parameters to get the answer from the docume
     
     const result = await response.json();
     return { ...result, method: 'direct' };
+  },
+
+  async checkRagAvailability() {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/rag/status`);
+      const data = await response.json();
+      return { available: data.available || false, kbId: data.kbId };
+    } catch (err) {
+      return { available: false };
+    }
+  },
+
+  async getRagBanks() {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/rag/banks`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch RAG banks: ${response.status}`);
+      }
+      return await response.json();
+    } catch (err) {
+      console.error('Error fetching RAG banks:', err);
+      return { success: false, banks: [] };
+    }
+  },
+
+  async addBankToRAG(bankName, cik) {
+    const response = await fetch(`${BACKEND_URL}/api/add-bank-to-rag`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bankName, cik })
+    });
+    
+    const contentType = response.headers.get('content-type');
+    
+    if (!response.ok) {
+      // Try to parse error as JSON, fallback to text
+      let errorMessage = 'Failed to add bank to RAG';
+      try {
+        if (contentType && contentType.includes('application/json')) {
+          const error = await response.json();
+          errorMessage = error.error || error.message || errorMessage;
+        } else {
+          const text = await response.text();
+          errorMessage = `Server error (${response.status}): ${text.substring(0, 100)}`;
+        }
+      } catch (parseErr) {
+        errorMessage = `Server error (${response.status})`;
+      }
+      throw new Error(errorMessage);
+    }
+    
+    // Parse successful response
+    try {
+      return await response.json();
+    } catch (parseErr) {
+      throw new Error('Invalid response from server');
+    }
   },
 
   // Streaming method

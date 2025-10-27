@@ -7,7 +7,9 @@ ENV UV_SYSTEM_PYTHON=1 \
     PYTHONUNBUFFERED=1 \
     DOCKER_CONTAINER=1 \
     AWS_REGION=us-east-1 \
-    AWS_DEFAULT_REGION=us-east-1
+    AWS_DEFAULT_REGION=us-east-1 \
+    BEDROCK_AGENTCORE_MEMORY_ID=bank_iq_agent_mem-I72r3PCvWO \
+    BEDROCK_AGENTCORE_MEMORY_NAME=bank_iq_agent_mem
 
 
 
@@ -42,4 +44,4 @@ COPY . .
 
 # Use the full module path
 
-CMD ["opentelemetry-instrument", "python", "-m", "bank_iq_agent_v1"]
+CMD ["opentelemetry-instrument", "python", "-m", "bank_iq_agent"]

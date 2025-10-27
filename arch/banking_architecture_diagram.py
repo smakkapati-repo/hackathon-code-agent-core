@@ -116,7 +116,7 @@ with Diagram(
     ecs_backend >> Edge(label="5. Invoke Agent", color="#FF5722", style="bold") >> agentcore
     
     # Step 7: AgentCore to Claude
-    agentcore >> Edge(label="6. AI Analysis", color="#E91E63") >> claude
+    agentcore >> Edge(label="6. AI Analysis\nBank Performance\nCompliance Scoring", color="#E91E63") >> claude
     
     # Step 8: Document Storage
     ecs_backend >> Edge(label="7. Upload Docs", color="#FF9800") >> s3_docs

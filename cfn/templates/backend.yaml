@@ -33,6 +33,11 @@ Parameters:
     Type: String
     Default: latest
     Description: Docker image tag for backend
+  
+  KnowledgeBaseId:
+    Type: String
+    Default: ''
+    Description: Optional Bedrock Knowledge Base ID for RAG
 
 Resources:
   # ============================================================================
@@ -209,6 +214,8 @@ Resources:
               Value: 'debug'
             - Name: NODE_ENV
               Value: 'production'
+            - Name: KNOWLEDGE_BASE_ID
+              Value: !Ref KnowledgeBaseId
           LogConfiguration:
             LogDriver: awslogs
             Options:

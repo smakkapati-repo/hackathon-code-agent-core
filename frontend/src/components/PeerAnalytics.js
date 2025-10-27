@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { usePersistedState } from '../hooks/usePersistedState';
 import {
   Box, Typography, Card, CardContent, Grid,
   FormControl, InputLabel, Select, MenuItem, Button,
@@ -12,20 +13,21 @@ import ReactMarkdown from 'react-markdown';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 
 function PeerAnalytics() {
-  const [selectedBank, setSelectedBank] = useState('');
-  const [selectedPeers, setSelectedPeers] = useState([]);
-  const [selectedMetric, setSelectedMetric] = useState('');
+  const [selectedBank, setSelectedBank] = usePersistedState('peer_selectedBank', '');
+  const [selectedPeers, setSelectedPeers] = usePersistedState('peer_selectedPeers', []);
+  const [selectedMetric, setSelectedMetric] = usePersistedState('peer_selectedMetric', '');
   const [loading, setLoading] = useState(false);
-  const [fdicData, setFdicData] = useState(null);
-  const [chartData, setChartData] = useState([]);
-  const [analysis, setAnalysis] = useState('');
+  const [fdicData, setFdicData] = usePersistedState('peer_fdicData', null);
+  const [chartData, setChartData] = usePersistedState('peer_chartData', []);
+  const [analysis, setAnalysis] = usePersistedState('peer_analysis', '');
   const [error, setError] = useState('');
-  const [dataMode, setDataMode] = useState('live'); // 'live' or 'local'
-  const [rawApiData, setRawApiData] = useState([]);
-  const [uploadedData, setUploadedData] = useState(null);
-  const [uploadedBanks, setUploadedBanks] = useState([]);
-  const [uploadedMetrics, setUploadedMetrics] = useState([]);
-  const [hasQuarterly, setHasQuarterly] = useState(false);
+  const [dataMode, setDataMode] = usePersistedState('peer_dataMode', 'live');
+  const [rawApiData, setRawApiData] = usePersistedState('peer_rawApiData', []);
+  const [uploadedData, setUploadedData] = usePersistedState('peer_uploadedData', null);
+  const [uploadedBanks, setUploadedBanks] = usePersistedState('peer_uploadedBanks', []);
+  const [uploadedMetrics, setUploadedMetrics] = usePersistedState('peer_uploadedMetrics', []);
+  const [hasQuarterly, setHasQuarterly] = usePersistedState('peer_hasQuarterly', false);
+  const [dataLoaded, setDataLoaded] = usePersistedState('peer_dataLoaded', false);
   const [hasMonthly, setHasMonthly] = useState(false);
 
   const [bankSearchQuery, setBankSearchQuery] = useState('');
@@ -61,16 +63,17 @@ function PeerAnalytics() {
   const metrics = analysisType === 'Quarterly Metrics' ? quarterlyMetrics : monthlyMetrics;
 
   useEffect(() => {
-    if (dataMode === 'live') {
+    if (dataMode === 'live' && !dataLoaded) {
       loadFDICData();
     }
-  }, [dataMode]);
+  }, [dataMode, dataLoaded]);
 
-  const [dataSource, setDataSource] = useState('');
+  const [dataSource, setDataSource] = usePersistedState('peer_dataSource', '');
 
   const loadFDICData = async () => {
     try {
       setLoading(true);
+      setDataLoaded(false);
       setError('🔄 Loading banking data... This may take 10-15 seconds for live FDIC data.');
       const response = await api.getFDICData();
       console.log('API Response:', response);
@@ -81,6 +84,7 @@ function PeerAnalytics() {
         throw new Error('API returned success: false');
       }
       setError(''); // Clear loading message
+      setDataLoaded(true);
     } catch (err) {
       console.error('FDIC data loading failed:', err);
       setError(`❌ Failed to load banking data: ${err.message || 'Network error'}`);

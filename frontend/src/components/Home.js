@@ -18,14 +18,14 @@ function Home() {
     {
       icon: <AssessmentIcon sx={{ fontSize: 48, color: 'primary.main' }} />,
       title: 'Smart Tool Selection',
-      description: 'Agent automatically picks from 12 banking tools: FDIC data, peer comparison, SEC filings, reports, document analysis, and more',
+      description: 'Claude Sonnet 4.5 automatically picks from 24 specialized banking tools: FDIC data, peer comparison, SEC filings, compliance monitoring, and more',
       status: 'AI-Powered'
     },
     {
       icon: <TrendingUpIcon sx={{ fontSize: 48, color: 'primary.main' }} />,
-      title: 'Production Ready',
-      description: 'ECS Fargate deployment with ALB - no timeouts, auto-scaling, and enterprise-grade reliability.',
-      status: 'Cloud-Native'
+      title: 'Enterprise-Grade',
+      description: 'ECS Fargate deployment with ALB - extended timeouts, auto-scaling, and cloud-native reliability.',
+      status: 'AWS-Powered'
     }
   ];
 
@@ -33,7 +33,7 @@ function Home() {
     { label: 'Banks Available', value: '500+', color: '#00778f' },
     { label: 'Metrics Tracked', value: '6+', color: '#00a897' },
     { label: 'Data Sources', value: '3', color: '#02c59b' },
-    { label: 'AI Tools', value: '12', color: '#A020F0' }
+    { label: 'AI Tools', value: '24', color: '#A020F0' }
   ];
 
   return (
@@ -96,10 +96,6 @@ function Home() {
       </Grid>
 
       {/* Features Section */}
-      <Typography variant="h5" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
-        Key Features
-      </Typography>
-      
       <Grid container spacing={2}>
         {features.map((feature, index) => (
           <Grid item xs={12} md={4} key={index}>
@@ -137,7 +133,7 @@ function Home() {
       </Grid>
 
       {/* Technology Stack */}
-      <Box sx={{ mt: 3, p: 2, backgroundColor: '#f8f9fa', borderRadius: 2 }}>
+      <Box sx={{ mt: 6, p: 2, backgroundColor: '#f8f9fa', borderRadius: 2 }}>
         <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, textAlign: 'center', mb: 2 }}>
           Technology Stack
         </Typography>

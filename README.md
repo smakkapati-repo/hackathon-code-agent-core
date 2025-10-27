@@ -10,10 +10,10 @@
 ### Amazon Bedrock AgentCore + Strands Framework
 This is a **reference implementation** showcasing:
 - **Amazon Bedrock AgentCore** - AWS's newly launched managed agent runtime (announced October 2025)
-- **Strands Framework** - Python-based agent orchestration with 16 custom tools
+- **Strands Framework** - Python-based agent orchestration with 24 custom tools
 - **Production Architecture** - CloudFront + ECS + Cognito + AgentCore (no API Gateway)
 - **Conversational Memory** - Multi-turn conversations with context retention
-- **Tool Orchestration** - Claude Sonnet 4.5 automatically selects from 12 specialized tools
+- **Tool Orchestration** - Claude Sonnet 4.5 automatically selects from 24 specialized tools
 - **Enterprise Security** - JWT authentication, IAM roles, private subnets
 
 ### Banking Analytics Use Case
@@ -31,7 +31,7 @@ The AI agent can instantly correlate a bank's declining Net Interest Margin with
 
 BankIQ+ follows a modern, cloud-native architecture built on AWS services with security-first design. User requests flow through [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) for global content delivery, routing static files from [S3](https://docs.aws.amazon.com/s3/) and API calls to the [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html). The ALB distributes traffic to containerized applications running on [Amazon ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), eliminating server management while providing automatic scaling.
 
-The platform's intelligence comes from [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/), which orchestrates 12 specialized tools for banking analytics. The agent uses [Claude Sonnet 4.5](https://www.anthropic.com/claude) for natural language understanding and maintains conversational memory across sessions. External data integration includes FDIC APIs for real-time banking metrics and SEC EDGAR APIs for financial filings. Documents uploaded to S3 are analyzed using PyPDF2 for metadata extraction and Claude for comprehensive analysis.
+The platform's intelligence comes from [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/), which orchestrates 24 specialized tools for banking analytics. The agent uses [Claude Sonnet 4.5](https://www.anthropic.com/claude) for natural language understanding and maintains conversational memory across sessions. External data integration includes FDIC APIs for real-time banking metrics and SEC EDGAR APIs for financial filings. Documents uploaded to S3 are analyzed using PyPDF2 for metadata extraction and Claude for comprehensive analysis.
 
 Security is embedded throughout: [AWS Cognito](https://docs.aws.amazon.com/cognito/) provides enterprise-grade authentication with OAuth 2.0 and JWT tokens, Fargate containers run in private subnets with JWT verification, [IAM roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) provide fine-grained access control, and [CloudWatch](https://docs.aws.amazon.com/cloudwatch/) enables comprehensive monitoring. The architecture eliminates API Gateway's 30-second timeout limitation, supporting long-running queries up to 300 seconds. Infrastructure is deployed through [CloudFormation](https://docs.aws.amazon.com/cloudformation/) templates, ensuring consistent, repeatable deployments.
 
@@ -68,6 +68,7 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 ### 📋 Financial Reports
 - **SEC Filings**: 10-K and 10-Q analysis for any public bank
 - **Document Upload**: Analyze your own financial PDFs
+- **RAG Expansion**: One-click to add any bank (500+) to RAG knowledge base
 - **Conversational Memory**: Context-aware across queries
 - **AI Chat**: Interactive Q&A about uploaded documents
 
@@ -78,7 +79,7 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 - **Regulatory Alerts**: Automated compliance monitoring and alerts
 
 
-## 🎯 AI Agent Tools (16 Custom Tools)
+## 🎯 AI Agent Tools (24 Custom Tools + RAG)
 
 **Strands Framework Implementation** - Each tool is a Python function with:
 - Input/output schemas (Pydantic models)
@@ -86,27 +87,63 @@ Complete documentation is available in the **[docs/](docs/)** folder:
 - Integration with external APIs (FDIC, SEC EDGAR)
 - S3 operations for document storage
 
+**FDIC & Live Data (3):**
 1. `get_fdic_data` - Current FDIC banking data (live API integration)
 2. `search_fdic_bank` - Search FDIC by bank name
-3. `compare_banks` - Peer performance comparison with trend analysis
-4. `get_sec_filings` - SEC EDGAR filings (10-K, 10-Q)
-5. `generate_bank_report` - Comprehensive multi-metric analysis
-6. `answer_banking_question` - General Q&A with context
+3. `compare_banks_live_fdic` - Live FDIC peer comparison
+
+**Peer Comparison (2):**
+4. `compare_banks_local_csv` - Compare banks using uploaded CSV
+5. `compare_banks` - Smart router (auto-selects live/local/RAG)
+
+**SEC Filings & Search (2):**
+6. `get_sec_filings` - SEC EDGAR filings (10-K, 10-Q)
 7. `search_banks` - Bank search by name/ticker (500+ banks)
-8. `upload_csv_to_s3` - Upload CSV data with validation
-9. `analyze_csv_peer_performance` - Analyze custom CSV data
-10. `analyze_and_upload_pdf` - Upload and analyze PDFs (PyPDF2 + Claude)
-11. `analyze_uploaded_pdf` - Analyze PDFs in S3
-12. `chat_with_documents` - Multi-turn document Q&A with memory
-13. `compliance_risk_assessment` - Real-time compliance scoring using FDIC data
-14. `regulatory_alerts_monitor` - Monitor regulatory thresholds and generate alerts
-15. `audit_document_analyzer` - Analyze documents for audit findings and compliance issues
-16. `upload_document_to_s3` - Legacy upload function (redirects to analyze_and_upload_pdf)
+
+**Report Generation (4):**
+8. `generate_bank_report` - General comprehensive report
+9. `generate_live_sec_report` - Live SEC filing analysis
+10. `generate_rag_indexed_report` - RAG pre-indexed report
+11. `generate_local_document_report` - Uploaded document report
+
+**Chat & Q&A (4):**
+12. `answer_banking_question` - General Q&A with context
+13. `chat_with_live_filings` - Chat about live SEC filings
+14. `chat_with_rag_knowledge_base` - Chat with RAG indexed data
+15. `chat_with_local_documents` - Chat about uploaded documents
+
+**CSV Upload & Analysis (3):**
+16. `upload_peer_csv_data` - Upload peer comparison CSV
+17. `upload_csv_to_s3` - Direct S3 CSV upload
+18. `analyze_csv_peer_performance` - Analyze custom CSV data
+
+**PDF Upload & Analysis (3):**
+19. `analyze_and_upload_pdf` - Upload and analyze PDFs (PyPDF2 + Claude)
+20. `upload_document_to_s3` - Direct S3 document upload
+21. `analyze_uploaded_pdf` - Analyze PDFs already in S3
+
+**Compliance & Audit (3):**
+22. `compliance_risk_assessment` - Real-time compliance scoring
+23. `regulatory_alerts_monitor` - Monitor regulatory thresholds
+24. `audit_document_analyzer` - Analyze audit findings and compliance
 
 **Tool Orchestration**: Claude Sonnet 4.5 automatically selects the right tool(s) based on user intent. For example:
 - "Compare JPMorgan and Bank of America ROA" → `compare_banks` tool
 - "What are Webster's key risks?" → `get_sec_filings` + `chat_with_documents` tools
 - "Analyze my custom peer data" → `upload_csv_to_s3` + `analyze_csv_peer_performance` tools
+
+### 🧠 RAG Mode (Included)
+**Bedrock Knowledge Base** with pre-indexed SEC filings:
+- **Coverage**: Top 10 banks, Oct 2024-Oct 2025 (40 filings)
+- **Speed**: Instant semantic search (pre-indexed vectors)
+- **One-Click Expansion**: Add any bank from SEC EDGAR (500+) to RAG index with one click
+- **Tools**: `chat_with_rag_knowledge_base`, `generate_rag_indexed_report`
+- **Fallback**: Automatically uses Live SEC EDGAR for other banks
+- **Deployment**: Auto-deployed with main stack
+
+**Add Banks to RAG**: Search for any bank in the SEC database and add their Oct 2024-Oct 2025 filings to the RAG knowledge base with a single click. The system automatically downloads and indexes the filings.
+
+See [RAG Integration Guide](docs/RAG_INTEGRATION.md) for details.
 
 ## 🌟 Amazon Bedrock AgentCore Highlights
 
@@ -208,6 +245,7 @@ aws configure
 ```bash
 cd amzon-bedrock-agentcore-bank-analytics
 ./cfn/scripts/deploy-all.sh
+# RAG Knowledge Base is automatically deployed
 ```
 
 **Deployment Progress:**
@@ -216,15 +254,19 @@ cd amzon-bedrock-agentcore-bank-analytics
   - Configures OAuth 2.0 authentication
   - Sets up Hosted UI
 
-- 🔵 **[1/4] Infrastructure** (~5-7 minutes)
+- 🔵 **[1/4] Infrastructure** (~10-15 minutes)
   - VPC with public/private subnets
   - Application Load Balancer
   - ECS cluster
-  - S3 buckets
+  - S3 buckets (frontend, uploaded-docs, sec-filings)
   - ECR repositories
+  - OpenSearch Serverless collection
+  - IAM roles (ECS, AgentCore, Bedrock KB)
 
-- 🔵 **[2/4] AgentCore Agent** (~5-7 minutes)
-  - Builds and deploys Python agent with 16 tools
+- 🔵 **[2/4] Agent + RAG** (~10-15 minutes, parallel execution)
+  - Downloads 40 SEC filings (top 10 banks)
+  - Creates Bedrock Knowledge Base + starts ingestion
+  - Builds and deploys Python agent with 24 tools
   - Adds S3 permissions automatically
   - Creates conversational memory
 
@@ -241,7 +283,7 @@ cd amzon-bedrock-agentcore-bank-analytics
   - Creates CloudFront distribution
   - Updates Cognito callback URLs
 
-**Total Time**: ~20-25 minutes
+**Total Time**: ~30-40 minutes
 
 **Step 4: Access Your Application**
 

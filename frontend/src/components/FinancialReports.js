@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Box, Typography, Card, CardContent, Grid, Button,
   TextField, Paper, Chip, List, ListItem, ListItemText,
-  CircularProgress, Alert, Divider
+  CircularProgress, Alert, Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import ChatIcon from '@mui/icons-material/Chat';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -11,27 +11,37 @@ import CloudIcon from '@mui/icons-material/Cloud';
 import SearchIcon from '@mui/icons-material/Search';
 import { api } from '../services/api';
 import ReactMarkdown from 'react-markdown';
+import { usePersistedState } from '../hooks/usePersistedState';
 
 function FinancialReports() {
-  const [selectedBank, setSelectedBank] = useState('');
+  const [selectedBank, setSelectedBank] = usePersistedState('reports_selectedBank', '');
   const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = useState([]);
-  const [reports, setReports] = useState({ '10-K': [], '10-Q': [] });
+  const [chatHistory, setChatHistory] = usePersistedState('reports_chatHistory', []);
+  const [reports, setReports] = usePersistedState('reports_reports', { '10-K': [], '10-Q': [] });
   const [loading, setLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [error, setError] = useState('');
-  const [fullReport, setFullReport] = useState('');
+  const [fullReport, setFullReport] = usePersistedState('reports_fullReport', '');
   const [reportLoading, setReportLoading] = useState(false);
   const [pollingStatus, setPollingStatus] = useState('');
-  const [mode, setMode] = useState('live'); // 'live' or 'local'
+  const [mode, setMode] = usePersistedState('reports_mode', 'live');
   const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [analyzedDocs, setAnalyzedDocs] = useState([]);
+  const [analyzedDocs, setAnalyzedDocs] = usePersistedState('reports_analyzedDocs', []);
   const [searchBank, setSearchBank] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [selectedBankCik, setSelectedBankCik] = useState(null);
+  const [selectedBankCik, setSelectedBankCik] = usePersistedState('reports_selectedBankCik', null);
+  const [ragAvailable, setRagAvailable] = useState(false);
+  const [showAddBankDialog, setShowAddBankDialog] = useState(false);
+  const [addBankSearch, setAddBankSearch] = useState('');
+  const [addBankResults, setAddBankResults] = useState([]);
+  const [addingToRAG, setAddingToRAG] = useState(false);
+  const [addBankStatus, setAddBankStatus] = useState('');
+  const [ragBanks, setRagBanks] = useState([]);
+  const [loadingRagBanks, setLoadingRagBanks] = useState(false);
 
+  // Fallback popular banks with CIKs for search/selection
   const popularBanks = {
     "JPMORGAN CHASE & CO": "0000019617",
     "BANK OF AMERICA CORP": "0000070858",
@@ -44,6 +54,39 @@ function FinancialReports() {
     "CAPITAL ONE FINANCIAL CORP": "0000927628",
     "TRUIST FINANCIAL CORP": "0001534701"
   };
+
+  // Fetch available RAG banks
+  const fetchRagBanks = async () => {
+    try {
+      setLoadingRagBanks(true);
+      const response = await api.getRagBanks();
+      if (response.success && response.banks) {
+        setRagBanks(response.banks);
+      }
+    } catch (err) {
+      console.error('Failed to fetch RAG banks:', err);
+    } finally {
+      setLoadingRagBanks(false);
+    }
+  };
+
+  useEffect(() => {
+    // Check if RAG is available on mount
+    const checkRagAvailability = async () => {
+      try {
+        const response = await api.checkRagAvailability();
+        setRagAvailable(response.available);
+        
+        // If RAG is available, fetch the bank list
+        if (response.available) {
+          fetchRagBanks();
+        }
+      } catch (err) {
+        setRagAvailable(false);
+      }
+    };
+    checkRagAvailability();
+  }, []);
 
   useEffect(() => {
     if (selectedBank && mode !== 'local') {
@@ -85,7 +128,8 @@ function FinancialReports() {
       if (mode === 'local') {
         response = await api.chatWithLocalFiles(messageToSend, analyzedDocs);
       } else {
-        response = await api.chatWithAI(messageToSend, selectedBank, reports, mode === 'rag', selectedBankCik);
+        // Pass mode to agent - it will decide which tool to use
+        response = await api.chatWithAI(messageToSend, selectedBank, reports, mode, selectedBankCik);
       }
       setChatHistory(prev => {
         const newHistory = [...prev];
@@ -137,23 +181,36 @@ function FinancialReports() {
       setError('');
       
       let inputText;
+      
+      // Mode-specific tool selection
+      const formatRequirements = `
+
+Format requirements:
+- 8 sections with ## markdown headers
+- Each section: 6-8 detailed paragraphs
+- Professional business style
+- Include specific metrics and data from filings`;
+
       if (mode === 'local' && analyzedDocs.length > 0) {
+        // LOCAL MODE: Use generate_local_document_report
         const doc = analyzedDocs[0];
         if (doc.s3_key) {
-          inputText = `Use the analyze_uploaded_pdf tool to generate a comprehensive financial analysis report.
+          inputText = `Generate a full financial analysis report for ${doc.bank_name} using their uploaded ${doc.form_type} document.
 
-Call analyze_uploaded_pdf with these parameters:
-- s3_key: "${doc.s3_key}"
-- bank_name: "${doc.bank_name}"
-- analysis_type: "comprehensive"
-
-Generate a detailed 8-section report with markdown headers covering all aspects of the bank's financial performance.`;
+IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.bank_name}") to get the document data, then format it into an 8-section report.${formatRequirements}`;
         } else {
-          inputText = `Generate a comprehensive financial analysis report for ${selectedBank} based on their ${doc.form_type} filing for fiscal year ${doc.year}. ` +
-            `Use publicly available data and SEC filings.`;
+          inputText = `Generate a comprehensive financial analysis report for ${selectedBank} based on their ${doc.form_type} filing for fiscal year ${doc.year}.${formatRequirements}`;
         }
+      } else if (mode === 'rag') {
+        // RAG MODE: Use generate_rag_indexed_report
+        inputText = `IMPORTANT: You MUST use the generate_rag_indexed_report tool.
+
+Call generate_rag_indexed_report(bank_name="${selectedBank}")${formatRequirements}`;
       } else {
-        inputText = `Use the generate_bank_report tool to create a comprehensive financial analysis report for ${selectedBank}. Call generate_bank_report with bank_name: "${selectedBank}".`;
+        // LIVE MODE: Use generate_live_sec_report
+        inputText = `IMPORTANT: You MUST use the generate_live_sec_report tool.
+
+Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, cik="${selectedBankCik}"` : ''})${formatRequirements}`;
       }
       
       // Submit async job
@@ -215,6 +272,40 @@ Generate a detailed 8-section report with markdown headers covering all aspects 
     }
   };
 
+  const handleSearchForRAG = async () => {
+    if (!addBankSearch.trim()) return;
+    try {
+      const results = await api.searchBanks(addBankSearch);
+      setAddBankResults(results);
+    } catch (err) {
+      setError('Search failed: ' + err.message);
+    }
+  };
+
+  const handleAddToRAG = async (bank) => {
+    try {
+      setAddingToRAG(true);
+      setAddBankStatus('Downloading SEC filings from Oct 2024-Oct 2025...');
+      
+      const result = await api.addBankToRAG(bank.name, bank.cik);
+      
+      setAddBankStatus('✅ ' + result.message + ' Bank will appear in the list shortly.');
+      
+      // Refresh the RAG banks list after a short delay
+      setTimeout(async () => {
+        await fetchRagBanks();
+        setShowAddBankDialog(false);
+        setAddBankSearch('');
+        setAddBankResults([]);
+        setAddBankStatus('');
+        setAddingToRAG(false);
+      }, 3000);
+    } catch (err) {
+      setAddBankStatus('❌ Failed: ' + err.message);
+      setAddingToRAG(false);
+    }
+  };
+
   const downloadReport = () => {
     const bankName = selectedBank.replace(/[^a-zA-Z0-9]/g, '_');
     const element = document.createElement('a');
@@ -270,13 +361,126 @@ Generate a detailed 8-section report with markdown headers covering all aspects 
           >
             Live
           </Button>
+
+          <Button 
+            variant={mode === 'rag' ? 'contained' : 'text'} 
+            size="small"
+            onClick={() => {
+              if (!ragAvailable) {
+                setError('RAG mode is not available. Knowledge Base not deployed.');
+                return;
+              }
+              setMode('rag');
+              setSelectedBank('');
+              setChatHistory([]);
+              setFullReport('');
+              setReports({ '10-K': [], '10-Q': [] });
+              setUploadedFiles([]);
+              setAnalyzedDocs([]);
+              setError('');
+              setReportLoading(false);
+            }}
+            startIcon={<SearchIcon />}
+            disabled={!ragAvailable}
+            sx={{ 
+              minWidth: 80, 
+              fontSize: '0.8rem',
+              opacity: ragAvailable ? 1 : 0.5
+            }}
+            title={ragAvailable ? 'RAG Mode - Pre-indexed vector search' : 'RAG not available - Knowledge Base not deployed'}
+          >
+            RAG {!ragAvailable && '🔒'}
+          </Button>
         </Box>
       </Box>
+
+      {/* Clear All Button */}
+      {(selectedBank || searchResults.length > 0 || chatHistory.length > 0 || fullReport) && (
+        <Box sx={{ mb: 2 }}>
+          <Button 
+            variant="outlined" 
+            onClick={() => {
+              setSelectedBank('');
+              setSelectedBankCik(null);
+              setChatHistory([]);
+              setFullReport('');
+              setReports({ '10-K': [], '10-Q': [] });
+              setSearchResults([]);
+              setSearchBank('');
+              setError('');
+              setReportLoading(false);
+              setPollingStatus('');
+            }}
+            color="secondary"
+            size="small"
+          >
+            🗑️ Clear All
+          </Button>
+        </Box>
+      )}
 
       {/* Bank Selection */}
       <Grid container spacing={4} sx={{ mb: 4 }}>
         <Grid item xs={12}>
-          {mode === 'live' ? (
+          {mode === 'rag' ? (
+            <>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <SearchIcon /> RAG Mode - Pre-Indexed Vector Search
+              </Typography>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <strong>Fast semantic search</strong> across pre-indexed SEC filings (10-K & 10-Q) from Oct 2024 - Oct 2025. Add more banks using the button below.
+              </Alert>
+              
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  Select a bank {ragBanks.length > 0 && `(${ragBanks.length} available)`}:
+                </Typography>
+                <Button 
+                  variant="outlined" 
+                  size="small"
+                  onClick={() => setShowAddBankDialog(true)}
+                  sx={{ textTransform: 'none' }}
+                >
+                  ➕ Add Bank to RAG
+                </Button>
+              </Box>
+              {loadingRagBanks ? (
+                <Box sx={{ textAlign: 'center', py: 3 }}>
+                  <CircularProgress size={24} />
+                  <Typography variant="body2" sx={{ mt: 1 }}>Loading banks...</Typography>
+                </Box>
+              ) : (
+                <Grid container spacing={2}>
+                  {ragBanks.map((bankFolder) => {
+                    // Convert folder name back to display name (e.g., JPMORGAN-CHASE -> JPMorgan Chase)
+                    const displayName = bankFolder
+                      .split('-')
+                      .map(word => word.charAt(0) + word.slice(1).toLowerCase())
+                      .join(' ');
+                    
+                    return (
+                      <Grid item key={bankFolder}>
+                        <Button
+                          variant={selectedBank === displayName ? 'contained' : 'outlined'}
+                          onClick={() => {
+                            setSelectedBank(displayName);
+                            setSelectedBankCik(null); // CIK not needed for RAG mode
+                            setChatHistory([]);
+                            setFullReport('');
+                            setError('');
+                            setReportLoading(false);
+                          }}
+                          sx={{ textTransform: 'none', fontSize: '0.8rem' }}
+                        >
+                          🏦 {displayName}
+                        </Button>
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+              )}
+            </>
+          ) : mode === 'live' ? (
             <>
               <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CloudIcon /> Live EDGAR Mode - Real-time SEC Data (Banking Companies Only)
@@ -300,26 +504,6 @@ Generate a detailed 8-section report with markdown headers covering all aspects 
                 >
                   {searching ? 'Searching...' : 'Search'}
                 </Button>
-                {(selectedBank || searchResults.length > 0 || chatHistory.length > 0 || fullReport) && (
-                  <Button 
-                    variant="outlined" 
-                    onClick={() => {
-                      setSelectedBank('');
-                      setSelectedBankCik(null);
-                      setChatHistory([]);
-                      setFullReport('');
-                      setReports({ '10-K': [], '10-Q': [] });
-                      setSearchResults([]);
-                      setSearchBank('');
-                      setError('');
-                      setReportLoading(false);
-                      setPollingStatus('');
-                    }}
-                    color="secondary"
-                  >
-                    🗑️ Clear All
-                  </Button>
-                )}
               </Box>
               
               {/* Search Results */}
@@ -743,6 +927,17 @@ Generate a detailed 8-section report with markdown headers covering all aspects 
 
 
       
+      {!selectedBank && mode === 'rag' && (
+        <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: '#f8f9fa' }}>
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            🔍 RAG Mode - Vector Search
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Pre-indexed SEC filings for instant semantic search. Select a bank above to start querying.
+          </Typography>
+        </Paper>
+      )}
+      
       {!selectedBank && mode === 'live' && (
         <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: '#f8f9fa' }}>
           <Typography variant="h6" color="text.secondary" gutterBottom>
@@ -764,6 +959,70 @@ Generate a detailed 8-section report with markdown headers covering all aspects 
           </Typography>
         </Paper>
       )}
+
+      <Dialog open={showAddBankDialog} onClose={() => !addingToRAG && setShowAddBankDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Bank to RAG Knowledge Base</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+            Search for a bank to add its Oct 2024-Oct 2025 SEC filings to the RAG index.
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Search bank name..."
+              value={addBankSearch}
+              onChange={(e) => setAddBankSearch(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSearchForRAG()}
+              disabled={addingToRAG}
+            />
+            <Button 
+              variant="contained" 
+              onClick={handleSearchForRAG}
+              disabled={!addBankSearch.trim() || addingToRAG}
+            >
+              Search
+            </Button>
+          </Box>
+          
+          {addBankResults.length > 0 && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ mb: 1, fontWeight: 600 }}>Results:</Typography>
+              <List dense>
+                {addBankResults.map((bank, idx) => (
+                  <ListItem 
+                    key={idx}
+                    button
+                    onClick={() => !addingToRAG && handleAddToRAG(bank)}
+                    disabled={addingToRAG}
+                    sx={{ border: '1px solid #e0e0e0', borderRadius: 1, mb: 1 }}
+                  >
+                    <ListItemText primary={bank.name} secondary={`CIK: ${bank.cik}`} />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          )}
+          
+          {addBankStatus && (
+            <Alert severity={addBankStatus.includes('✅') ? 'success' : addBankStatus.includes('❌') ? 'error' : 'info'}>
+              {addBankStatus}
+            </Alert>
+          )}
+          
+          {addingToRAG && <CircularProgress sx={{ display: 'block', mx: 'auto', mt: 2 }} />}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setShowAddBankDialog(false);
+            setAddBankSearch('');
+            setAddBankResults([]);
+            setAddBankStatus('');
+          }} disabled={addingToRAG}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

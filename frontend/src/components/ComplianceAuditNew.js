@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { usePersistedState } from '../hooks/usePersistedState';
 import {
   Box,
   Typography,
@@ -24,7 +25,7 @@ import {
   Paper,
   Avatar,
   Stack,
-
+  Tooltip
 } from '@mui/material';
 import {
   Warning,
@@ -46,7 +47,7 @@ import {
   LinearScale,
   BarElement,
   Title,
-  Tooltip,
+  Tooltip as ChartJSTooltip,
   Legend,
   ArcElement,
   PointElement,
@@ -60,7 +61,7 @@ ChartJS.register(
   LinearScale,
   BarElement,
   Title,
-  Tooltip,
+  ChartJSTooltip,
   Legend,
   ArcElement,
   PointElement,
@@ -69,15 +70,17 @@ ChartJS.register(
 
 const ComplianceAudit = () => {
   const [loading, setLoading] = useState(false);
-  const [selectedBank, setSelectedBank] = useState('');
-  const [selectedBankCik, setSelectedBankCik] = useState(null);
+  const [selectedBank, setSelectedBank] = usePersistedState('compliance_selectedBank', '');
+  const [selectedBankCik, setSelectedBankCik] = usePersistedState('compliance_selectedBankCik', null);
   const [searchBank, setSearchBank] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [complianceData, setComplianceData] = useState(null);
+  const [complianceData, setComplianceData] = usePersistedState('compliance_complianceData', null);
   const [auditResults, setAuditResults] = useState(null);
-  const [alerts, setAlerts] = useState([]);
-  const [dataSource, setDataSource] = useState('');
+  const [alerts, setAlerts] = usePersistedState('compliance_alerts', []);
+  const [dataSource, setDataSource] = usePersistedState('compliance_dataSource', '');
+  const [aiAnalysis, setAiAnalysis] = useState('');
+  const [analysisLoading, setAnalysisLoading] = useState(false);
 
   const popularBanks = {
     "JPMORGAN CHASE & CO": "0000019617",
@@ -130,9 +133,91 @@ const ComplianceAudit = () => {
     setComplianceData(null);
     setAuditResults(null);
     setDataSource('');
+    setAiAnalysis('');
     setAlerts([
       { type: 'info', message: 'Ready for new compliance assessment', timestamp: 'Just now' }
     ]);
+  };
+
+  // Handle AI Analysis with async job pattern
+  const handleAIAnalysis = async () => {
+    if (!selectedBank) return;
+    
+    setAnalysisLoading(true);
+    setAiAnalysis('');
+    
+    try {
+      const baseURL = process.env.REACT_APP_API_GATEWAY_URL || window.location.origin;
+      
+      // Submit job
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+      
+      const jobResponse = await fetch(`${baseURL}/api/jobs/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          inputText: `Provide a comprehensive AI-powered compliance analysis for ${selectedBank}. Use the compliance_risk_assessment and regulatory_alerts_monitor tools to analyze regulatory risks, capital adequacy, liquidity coverage, and audit findings. Include specific recommendations and risk mitigation strategies.`,
+          sessionId: `compliance-${timestamp}-${randomId}`,
+          jobType: 'chat'
+        })
+      });
+      
+      if (!jobResponse.ok) {
+        throw { message: `HTTP ${jobResponse.status}` };
+      }
+      
+      const jobData = await jobResponse.json();
+      const jobId = jobData.jobId;
+      
+      if (!jobId) {
+        throw { message: 'No job ID returned' };
+      }
+      
+      // Poll for completion
+      let attempts = 0;
+      const maxAttempts = 60;
+      
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        const statusResponse = await fetch(`${baseURL}/api/jobs/${jobId}`);
+        const statusData = await statusResponse.json();
+        
+        if (statusData.status === 'completed') {
+          const resultResponse = await fetch(`${baseURL}/api/jobs/${jobId}/result`);
+          const resultData = await resultResponse.json();
+          const analysisText = resultData.result || resultData.response || resultData.output;
+          
+          if (analysisText && analysisText.trim()) {
+            setAiAnalysis(analysisText);
+            setAlerts(prev => [{
+              type: 'success',
+              message: 'AI compliance analysis completed',
+              timestamp: 'Just now'
+            }, ...prev.slice(0, 2)]);
+          }
+          break;
+        } else if (statusData.status === 'failed') {
+          throw { message: 'Job failed' };
+        }
+        
+        attempts++;
+      }
+      
+      if (attempts >= maxAttempts) {
+        throw { message: 'Analysis timeout' };
+      }
+      
+    } catch (error) {
+      console.error('AI analysis error:', error);
+      setAlerts(prev => [{
+        type: 'error',
+        message: `AI analysis failed: ${error.message}`,
+        timestamp: 'Just now'
+      }, ...prev.slice(0, 2)]);
+    }
+    setAnalysisLoading(false);
   };
 
   // Handle compliance risk assessment
@@ -141,49 +226,110 @@ const ComplianceAudit = () => {
     
     setLoading(true);
     try {
-      // Get FDIC data and perform analysis
-      const response = await AgentService.sendMessage(
-        `Use the get_fdic_data tool to get current banking data for "${selectedBank}". Then analyze the compliance and regulatory metrics. Extract key metrics like ROA, ROE, Tier 1 Capital Ratio, and Asset Quality. Provide a comprehensive analysis with specific numerical values from the FDIC data.`
-      );
+      // Use the chat endpoint directly for better reliability
+      const baseURL = process.env.REACT_APP_API_GATEWAY_URL || window.location.origin;
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
       
-      console.log('Agent response:', response);
+      const response = await fetch(`${baseURL}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Use the get_fdic_data tool to get current banking data for "${selectedBank}". Then analyze the compliance and regulatory metrics. Extract key metrics like ROA, ROE, Tier 1 Capital Ratio, and Asset Quality. Provide a comprehensive analysis with specific numerical values from the FDIC data.`,
+          sessionId: `compliance-assessment-${timestamp}-${randomId}`
+        })
+      });
+      
+      if (!response.ok) {
+        const errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+        throw { message: errorMsg };
+      }
+      
+      const result = await response.json();
+      const analysisText = result.response || result.output || result.message || '';
+      
+      console.log('Agent response:', analysisText);
       
       // Check if we got real FDIC data by looking for specific patterns
-      const hasFdicData = response.includes('"success": true') || 
-                         response.includes('ROA') || 
-                         response.includes('ASSET') || 
-                         response.includes('NETINC');
+      const hasFdicData = analysisText.includes('"success": true') || 
+                         analysisText.includes('ROA') || 
+                         analysisText.includes('ASSET') || 
+                         analysisText.includes('NETINC');
       
       if (hasFdicData) {
-        setDataSource('🟢 Real-time FDIC Data');
+        setDataSource('🟢 FDIC Data (2024-2025)');
         
-        // Extract numerical values from the response
-        const roaMatch = response.match(/"ROA":\s*([0-9.]+)/i);
-        const roeMatch = response.match(/"ROE":\s*([0-9.]+)/i);
-        const assetMatch = response.match(/"ASSET":\s*([0-9.]+)/i);
+        // Try to parse JSON response from agent
+        let parsedData = null;
+        try {
+          // Look for COMPLIANCE_DATA: prefix first
+          if (analysisText.includes('COMPLIANCE_DATA:')) {
+            // Extract everything after COMPLIANCE_DATA:
+            const afterPrefix = analysisText.split('COMPLIANCE_DATA:')[1];
+            // Find the JSON object by counting braces
+            let braceCount = 0;
+            let startIndex = -1;
+            let endIndex = -1;
+            
+            for (let i = 0; i < afterPrefix.length; i++) {
+              if (afterPrefix[i] === '{') {
+                if (startIndex === -1) startIndex = i;
+                braceCount++;
+              } else if (afterPrefix[i] === '}') {
+                braceCount--;
+                if (braceCount === 0 && startIndex !== -1) {
+                  endIndex = i + 1;
+                  break;
+                }
+              }
+            }
+            
+            if (startIndex !== -1 && endIndex !== -1) {
+              const jsonStr = afterPrefix.substring(startIndex, endIndex);
+              parsedData = JSON.parse(jsonStr);
+            }
+          } else {
+            // Fallback to old format
+            const jsonMatch = analysisText.match(/\{[^]*?"success"\s*:\s*true[^]*?\}/);
+            if (jsonMatch) {
+              parsedData = JSON.parse(jsonMatch[0]);
+            }
+          }
+        } catch (e) {
+          console.log('Could not parse JSON from agent response:', e);
+        }
         
-        const roa = roaMatch ? parseFloat(roaMatch[1]) : 1.42;
-        const roe = roeMatch ? parseFloat(roeMatch[1]) : 14.21;
-        const assets = assetMatch ? parseFloat(assetMatch[1]) : 27693;
+        // Use parsed data if available, otherwise extract from text
+        const roa = parsedData?.metrics?.roa || parseFloat(analysisText.match(/"ROA":\s*([0-9.]+)/i)?.[1] || 1.42);
+        const roe = parsedData?.metrics?.roe || parseFloat(analysisText.match(/"ROE":\s*([0-9.]+)/i)?.[1] || 14.21);
+        const assets = parsedData?.metrics?.assets || parseFloat(analysisText.match(/"ASSET":\s*([0-9.]+)/i)?.[1] || 27693);
         
-        // Calculate compliance scores based on actual data
-        const capitalScore = Math.min(100, Math.max(0, (roa * 50)));
-        const assetScore = Math.min(100, Math.max(0, (roe * 5)));
-        const liquidityScore = Math.min(100, Math.max(0, 85));
-        const profitabilityScore = Math.min(100, Math.max(0, (roa * 60)));
-        const overallScore = Math.round((capitalScore + assetScore + liquidityScore + profitabilityScore) / 4);
+        const capitalRisk = parsedData?.risk_gauges?.capital_risk || 75;
+        const liquidityRisk = parsedData?.risk_gauges?.liquidity_risk || 85;
+        const creditRisk = parsedData?.risk_gauges?.credit_risk || 65;
+        
+        const capitalScore = parsedData?.scores?.capital_adequacy || Math.round(capitalRisk);
+        const assetScore = parsedData?.scores?.asset_quality || Math.round(creditRisk);
+        const liquidityScore = parsedData?.scores?.liquidity || Math.round(liquidityRisk);
+        const profitabilityScore = parsedData?.scores?.profitability || Math.round(roa * 50);
+        const overallScore = parsedData?.overall_score || Math.round((capitalScore + assetScore + liquidityScore + profitabilityScore) / 4);
         
         setComplianceData({
           bankName: selectedBank,
           overallScore: overallScore,
-          capitalAdequacy: Math.round(capitalScore),
-          assetQuality: Math.round(assetScore),
-          liquidity: Math.round(liquidityScore),
-          profitability: Math.round(profitabilityScore),
-          lastUpdated: new Date().toLocaleDateString(),
+          capitalAdequacy: capitalScore,
+          assetQuality: assetScore,
+          liquidity: liquidityScore,
+          profitability: profitabilityScore,
+          capitalRisk: capitalRisk,
+          liquidityRisk: liquidityRisk,
+          creditRisk: creditRisk,
+          lastUpdated: new Intl.DateTimeFormat('en-US').format(new Date()),
           actualROA: roa,
           actualROE: roe,
-          actualAssets: assets
+          actualAssets: assets,
+          equityRatio: parsedData?.metrics?.equity_ratio,
+          ltdRatio: parsedData?.metrics?.ltd_ratio
         });
         
         setAlerts([
@@ -200,7 +346,7 @@ const ComplianceAudit = () => {
           assetQuality: 68,
           liquidity: 79,
           profitability: 71,
-          lastUpdated: new Date().toLocaleDateString()
+          lastUpdated: new Intl.DateTimeFormat('en-US').format(new Date())
         });
         
         setAlerts([
@@ -210,6 +356,11 @@ const ComplianceAudit = () => {
       
     } catch (error) {
       console.error('Compliance assessment error:', error);
+      setAlerts(prev => [{
+        type: 'error',
+        message: `Assessment failed: ${error.message}`,
+        timestamp: 'Just now'
+      }, ...prev.slice(0, 2)]);
     }
     setLoading(false);
   };
@@ -228,6 +379,9 @@ const ComplianceAudit = () => {
       <Typography variant="h4" gutterBottom sx={{ mb: 3, fontWeight: 'bold' }}>
         🛡️ Compliance & Audit Dashboard
       </Typography>
+      <Alert severity="info" sx={{ mb: 3 }}>
+        <strong>Data Period:</strong> October 2024 to October 2025 (Latest Available)
+      </Alert>
 
       {/* Bank Selection */}
       <Card sx={{ mb: 3 }}>
@@ -236,14 +390,14 @@ const ComplianceAudit = () => {
             Bank Selection & Assessment
           </Typography>
           {/* Bank Search */}
-          <Box sx={{ display: 'flex', gap: 1, mb: 3, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', gap: 1, mb: 3, alignItems: 'center', flexWrap: 'wrap' }}>
             <TextField
               placeholder="Search for any bank or financial institution..."
               value={searchBank}
               onChange={(e) => setSearchBank(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleBankSearch()}
               size="small"
-              sx={{ minWidth: 300 }}
+              sx={{ minWidth: 300, flexGrow: 1 }}
             />
             <Button 
               variant="contained" 
@@ -256,7 +410,7 @@ const ComplianceAudit = () => {
             <Button
               variant="outlined"
               onClick={handleReset}
-              disabled={loading}
+              disabled={loading || analysisLoading}
               startIcon={<Refresh />}
               color="secondary"
             >
@@ -311,20 +465,40 @@ const ComplianceAudit = () => {
           
           {selectedBank && (
             <Box sx={{ mb: 3 }}>
-              <Button
-                variant="contained"
-                onClick={handleComplianceAssessment}
-                disabled={loading || !selectedBank}
-                startIcon={<Assessment />}
-                size="large"
-                sx={{ mr: 2 }}
-              >
-                Assess Compliance for {selectedBank.replace(' CORP', '').replace(' INC', '')}
-              </Button>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <Button
+                  variant="contained"
+                  onClick={handleComplianceAssessment}
+                  disabled={loading || !selectedBank}
+                  startIcon={loading ? <CircularProgress size={16} /> : <Assessment />}
+                  size="large"
+                  fullWidth
+                >
+                  {loading ? 'Assessing...' : `Assess Compliance for ${selectedBank.replace(' CORP', '').replace(' INC', '').substring(0, 20)}${selectedBank.length > 20 ? '...' : ''}`}
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleAIAnalysis}
+                  disabled={analysisLoading || !selectedBank || !complianceData}
+                  startIcon={analysisLoading ? <CircularProgress size={16} /> : <Security />}
+                  size="large"
+                  color="secondary"
+                  fullWidth
+                >
+                  {analysisLoading ? 'Analyzing...' : 'AI Analysis'}
+                </Button>
+              </Stack>
             </Box>
           )}
         </CardContent>
       </Card>
+
+      {/* Data Source Indicator */}
+      {dataSource && complianceData && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <strong>Data Source:</strong> {dataSource}
+        </Alert>
+      )}
 
       {/* Professional Risk Temperature Gauges */}
       <Card sx={{ mb: 3 }}>
@@ -337,116 +511,157 @@ const ComplianceAudit = () => {
               <Grid container spacing={3}>
                 <Grid item xs={12} md={4}>
                   <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#f8f9fa' }}>
-                    <Typography variant="subtitle2" color="text.secondary">Capital Risk</Typography>
+                    <Tooltip title="Measures bank's capital adequacy to absorb losses. Higher score = lower risk. Based on Tier 1 capital ratio and equity levels." arrow>
+                      <Typography variant="subtitle2" color="text.secondary" sx={{ cursor: 'help', borderBottom: '1px dotted #999' }}>Capital Risk</Typography>
+                    </Tooltip>
                     <Box sx={{ position: 'relative', display: 'inline-flex', mt: 1 }}>
                       <CircularProgress
                         variant="determinate"
-                        value={75}
+                        value={complianceData.capitalRisk || 75}
                         size={80}
                         thickness={6}
-                        sx={{ color: '#ff9800' }}
+                        sx={{ color: complianceData.capitalRisk >= 80 ? '#4caf50' : complianceData.capitalRisk >= 60 ? '#ff9800' : '#f44336' }}
                       />
                       <Box sx={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Typography variant="h6" color="text.secondary">75%</Typography>
+                        <Typography variant="h6" color="text.secondary">{complianceData.capitalRisk || 75}%</Typography>
                       </Box>
                     </Box>
-                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>Moderate Risk</Typography>
+                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                      {complianceData.capitalRisk >= 80 ? 'Low Risk' : complianceData.capitalRisk >= 60 ? 'Moderate Risk' : 'High Risk'}
+                    </Typography>
+                    {complianceData.equityRatio && (
+                      <Typography variant="caption" display="block" color="text.secondary">
+                        Equity Ratio: {complianceData.equityRatio}%
+                      </Typography>
+                    )}
                   </Card>
                 </Grid>
                 <Grid item xs={12} md={4}>
                   <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#f8f9fa' }}>
-                    <Typography variant="subtitle2" color="text.secondary">Liquidity Risk</Typography>
+                    <Tooltip title="Assesses ability to meet short-term obligations. Higher score = lower risk. Based on loan-to-deposit ratio and liquid assets." arrow>
+                      <Typography variant="subtitle2" color="text.secondary" sx={{ cursor: 'help', borderBottom: '1px dotted #999' }}>Liquidity Risk</Typography>
+                    </Tooltip>
                     <Box sx={{ position: 'relative', display: 'inline-flex', mt: 1 }}>
                       <CircularProgress
                         variant="determinate"
-                        value={85}
+                        value={complianceData.liquidityRisk || 85}
                         size={80}
                         thickness={6}
-                        sx={{ color: '#4caf50' }}
+                        sx={{ color: complianceData.liquidityRisk >= 80 ? '#4caf50' : complianceData.liquidityRisk >= 60 ? '#ff9800' : '#f44336' }}
                       />
                       <Box sx={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Typography variant="h6" color="text.secondary">85%</Typography>
+                        <Typography variant="h6" color="text.secondary">{complianceData.liquidityRisk || 85}%</Typography>
                       </Box>
                     </Box>
-                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>Low Risk</Typography>
+                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                      {complianceData.liquidityRisk >= 80 ? 'Low Risk' : complianceData.liquidityRisk >= 60 ? 'Moderate Risk' : 'High Risk'}
+                    </Typography>
+                    {complianceData.ltdRatio && (
+                      <Typography variant="caption" display="block" color="text.secondary">
+                        LTD Ratio: {complianceData.ltdRatio}%
+                      </Typography>
+                    )}
                   </Card>
                 </Grid>
                 <Grid item xs={12} md={4}>
                   <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#f8f9fa' }}>
-                    <Typography variant="subtitle2" color="text.secondary">Credit Risk</Typography>
+                    <Tooltip title="Evaluates loan portfolio quality and default risk. Higher score = lower risk. Based on non-performing loans and charge-offs." arrow>
+                      <Typography variant="subtitle2" color="text.secondary" sx={{ cursor: 'help', borderBottom: '1px dotted #999' }}>Credit Risk</Typography>
+                    </Tooltip>
                     <Box sx={{ position: 'relative', display: 'inline-flex', mt: 1 }}>
                       <CircularProgress
                         variant="determinate"
-                        value={65}
+                        value={complianceData.creditRisk || 65}
                         size={80}
                         thickness={6}
-                        sx={{ color: '#f44336' }}
+                        sx={{ color: complianceData.creditRisk >= 80 ? '#4caf50' : complianceData.creditRisk >= 60 ? '#ff9800' : '#f44336' }}
                       />
                       <Box sx={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Typography variant="h6" color="text.secondary">65%</Typography>
+                        <Typography variant="h6" color="text.secondary">{complianceData.creditRisk || 65}%</Typography>
                       </Box>
                     </Box>
-                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>High Risk</Typography>
+                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                      {complianceData.creditRisk >= 80 ? 'Low Risk' : complianceData.creditRisk >= 60 ? 'Moderate Risk' : 'High Risk'}
+                    </Typography>
+                    {complianceData.actualROA && (
+                      <Typography variant="caption" display="block" color="text.secondary">
+                        ROA: {complianceData.actualROA}%
+                      </Typography>
+                    )}
                   </Card>
                 </Grid>
               </Grid>
               
-              {/* Alert Temperature Dials */}
+              {/* Alert Temperature Dials - Dynamic based on actual risk gauges */}
               <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle1" gutterBottom>Regulatory Alert Status</Typography>
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Warning sx={{ mr: 1 }} /> Regulatory Alert Status
+                </Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={12} md={4}>
-                    <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#fff3e0' }}>
+                    <Card sx={{ textAlign: 'center', p: 2, bgcolor: complianceData.capitalRisk < 30 ? '#e8f5e8' : complianceData.capitalRisk < 60 ? '#fff3e0' : '#ffebee' }}>
                       <Typography variant="subtitle2" color="text.secondary">Capital Alert</Typography>
                       <Box sx={{ position: 'relative', display: 'inline-flex', mt: 1 }}>
                         <CircularProgress
                           variant="determinate"
-                          value={25}
+                          value={complianceData.capitalRisk}
                           size={60}
                           thickness={8}
-                          sx={{ color: '#ff9800' }}
+                          sx={{ color: complianceData.capitalRisk < 30 ? '#4caf50' : complianceData.capitalRisk < 60 ? '#ff9800' : '#f44336' }}
                         />
                         <Box sx={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Warning sx={{ color: '#ff9800', fontSize: 20 }} />
+                          {complianceData.capitalRisk < 30 ? <CheckCircle sx={{ color: '#4caf50', fontSize: 20 }} /> :
+                           complianceData.capitalRisk < 60 ? <Warning sx={{ color: '#ff9800', fontSize: 20 }} /> :
+                           <Error sx={{ color: '#f44336', fontSize: 20 }} />}
                         </Box>
                       </Box>
-                      <Typography variant="caption" display="block" sx={{ mt: 1 }}>Tier 1 Approaching Min</Typography>
+                      <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                        {complianceData.capitalRisk < 30 ? 'Well Capitalized' : complianceData.capitalRisk < 60 ? 'Adequate Capital' : 'Capital Concern'}
+                      </Typography>
                     </Card>
                   </Grid>
                   <Grid item xs={12} md={4}>
-                    <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#e8f5e8' }}>
+                    <Card sx={{ textAlign: 'center', p: 2, bgcolor: complianceData.liquidityRisk < 30 ? '#e8f5e8' : complianceData.liquidityRisk < 60 ? '#fff3e0' : '#ffebee' }}>
                       <Typography variant="subtitle2" color="text.secondary">Liquidity Alert</Typography>
                       <Box sx={{ position: 'relative', display: 'inline-flex', mt: 1 }}>
                         <CircularProgress
                           variant="determinate"
-                          value={90}
+                          value={complianceData.liquidityRisk}
                           size={60}
                           thickness={8}
-                          sx={{ color: '#4caf50' }}
+                          sx={{ color: complianceData.liquidityRisk < 30 ? '#4caf50' : complianceData.liquidityRisk < 60 ? '#ff9800' : '#f44336' }}
                         />
                         <Box sx={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <CheckCircle sx={{ color: '#4caf50', fontSize: 20 }} />
+                          {complianceData.liquidityRisk < 30 ? <CheckCircle sx={{ color: '#4caf50', fontSize: 20 }} /> :
+                           complianceData.liquidityRisk < 60 ? <Warning sx={{ color: '#ff9800', fontSize: 20 }} /> :
+                           <Error sx={{ color: '#f44336', fontSize: 20 }} />}
                         </Box>
                       </Box>
-                      <Typography variant="caption" display="block" sx={{ mt: 1 }}>Coverage Adequate</Typography>
+                      <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                        {complianceData.liquidityRisk < 30 ? 'Strong Liquidity' : complianceData.liquidityRisk < 60 ? 'Adequate Liquidity' : 'Liquidity Concern'}
+                      </Typography>
                     </Card>
                   </Grid>
                   <Grid item xs={12} md={4}>
-                    <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee' }}>
+                    <Card sx={{ textAlign: 'center', p: 2, bgcolor: complianceData.creditRisk < 30 ? '#e8f5e8' : complianceData.creditRisk < 60 ? '#fff3e0' : '#ffebee' }}>
                       <Typography variant="subtitle2" color="text.secondary">Credit Alert</Typography>
                       <Box sx={{ position: 'relative', display: 'inline-flex', mt: 1 }}>
                         <CircularProgress
                           variant="determinate"
-                          value={15}
+                          value={complianceData.creditRisk}
                           size={60}
                           thickness={8}
-                          sx={{ color: '#f44336' }}
+                          sx={{ color: complianceData.creditRisk < 30 ? '#4caf50' : complianceData.creditRisk < 60 ? '#ff9800' : '#f44336' }}
                         />
                         <Box sx={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Error sx={{ color: '#f44336', fontSize: 20 }} />
+                          {complianceData.creditRisk < 30 ? <CheckCircle sx={{ color: '#4caf50', fontSize: 20 }} /> :
+                           complianceData.creditRisk < 60 ? <Warning sx={{ color: '#ff9800', fontSize: 20 }} /> :
+                           <Error sx={{ color: '#f44336', fontSize: 20 }} />}
                         </Box>
                       </Box>
-                      <Typography variant="caption" display="block" sx={{ mt: 1 }}>Below Peer Average</Typography>
+                      <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                        {complianceData.creditRisk < 30 ? 'Strong Asset Quality' : complianceData.creditRisk < 60 ? 'Adequate Quality' : 'Quality Concern'}
+                      </Typography>
                     </Card>
                   </Grid>
                 </Grid>
@@ -461,6 +676,152 @@ const ComplianceAudit = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* AI Analysis Section */}
+      {(aiAnalysis || analysisLoading) && !aiAnalysis.startsWith('Error:') && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+              <Security sx={{ mr: 1, color: 'primary.main' }} /> AI-Powered Compliance Analysis
+              {analysisLoading && <CircularProgress size={20} sx={{ ml: 2 }} />}
+            </Typography>
+            {analysisLoading ? (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <CircularProgress />
+                <Typography variant="body2" sx={{ mt: 2 }}>Analyzing compliance data...</Typography>
+              </Box>
+            ) : (
+              <Box>
+                {/* Executive Summary Card */}
+                <Card sx={{ mb: 3, background: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)', color: 'white' }}>
+                  <CardContent>
+                    <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
+                      <Assessment sx={{ mr: 1 }} /> Executive Summary
+                    </Typography>
+                    <Typography variant="body1" sx={{ lineHeight: 1.8, opacity: 0.95 }}>
+                      {(() => {
+                        let cleanText = aiAnalysis;
+                        
+                        // Remove JSON blocks by finding matching braces
+                        if (cleanText.includes('{') && cleanText.includes('"success"')) {
+                          let startIdx = cleanText.indexOf('{');
+                          let braceCount = 0;
+                          let endIdx = startIdx;
+                          for (let i = startIdx; i < cleanText.length; i++) {
+                            if (cleanText[i] === '{') braceCount++;
+                            if (cleanText[i] === '}') braceCount--;
+                            if (braceCount === 0) {
+                              endIdx = i + 1;
+                              break;
+                            }
+                          }
+                          cleanText = cleanText.substring(endIdx).trim();
+                        }
+                        
+                        // Extract first meaningful paragraph
+                        if (cleanText.includes('## ')) {
+                          return cleanText.split('## ')[0].replace(/^# .*?\n\n/, '').split('\n\n')[0];
+                        }
+                        
+                        const paragraphs = cleanText.split('\n\n').filter(p => p.trim().length > 50);
+                        return paragraphs[0] || 'AI analysis completed successfully.';
+                      })()}
+                    </Typography>
+                  </CardContent>
+                </Card>
+
+                {/* Key Metrics Grid */}
+                {complianceData && (
+                  <Grid container spacing={2} sx={{ mb: 3 }}>
+                    <Grid item xs={12} md={3}>
+                      <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#fef3c7', border: '2px solid #f59e0b' }}>
+                        <Typography variant="h4" sx={{ color: '#d97706', fontWeight: 'bold' }}>{complianceData.overallScore}</Typography>
+                        <Typography variant="body2" sx={{ color: '#92400e' }}>Compliance Score</Typography>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12} md={3}>
+                      <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#fecaca', border: '2px solid #ef4444' }}>
+                        <Typography variant="h4" sx={{ color: '#dc2626', fontWeight: 'bold' }}>{complianceData.equityRatio ? `${complianceData.equityRatio}%` : 'N/A'}</Typography>
+                        <Typography variant="body2" sx={{ color: '#991b1b' }}>Equity Ratio</Typography>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12} md={3}>
+                      <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#dcfce7', border: '2px solid #22c55e' }}>
+                        <Typography variant="h4" sx={{ color: '#16a34a', fontWeight: 'bold' }}>{complianceData.assetQuality}</Typography>
+                        <Typography variant="body2" sx={{ color: '#15803d' }}>Asset Quality</Typography>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12} md={3}>
+                      <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#e0e7ff', border: '2px solid #6366f1' }}>
+                        <Typography variant="h4" sx={{ color: '#4f46e5', fontWeight: 'bold' }}>{complianceData.actualROA ? `${complianceData.actualROA.toFixed(2)}%` : 'N/A'}</Typography>
+                        <Typography variant="body2" sx={{ color: '#3730a3' }}>ROA</Typography>
+                      </Card>
+                    </Grid>
+                  </Grid>
+                )}
+
+                {/* Key Insights - Professional Business Style */}
+                <Grid container spacing={2}>
+                  {(() => {
+                    const sections = aiAnalysis.includes('## ') ? aiAnalysis.split('## ').slice(1) : [aiAnalysis];
+                    const insights = sections.slice(0, 4).map((section, index) => {
+                      const [title, ...content] = aiAnalysis.includes('## ') ? section.split('\n\n') : [`Key Insight ${index + 1}`, section];
+                      const contentText = content.join(' ').split('.').slice(0, 2).join('.') + '.';
+                      return { title: title.trim(), content: contentText.trim() };
+                    });
+                    
+                    const colors = [
+                      { bg: '#f8fafc', border: '#0ea5e9', icon: '#0284c7' },
+                      { bg: '#fefce8', border: '#eab308', icon: '#ca8a04' },
+                      { bg: '#f0fdf4', border: '#22c55e', icon: '#16a34a' },
+                      { bg: '#fef2f2', border: '#ef4444', icon: '#dc2626' }
+                    ];
+                    
+                    return insights.map((insight, index) => (
+                      <Grid item xs={12} md={6} key={index}>
+                        <Card sx={{ 
+                          height: '100%',
+                          bgcolor: colors[index].bg,
+                          borderLeft: `4px solid ${colors[index].border}`,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                        }}>
+                          <CardContent sx={{ p: 2 }}>
+                            <Typography 
+                              variant="subtitle2" 
+                              sx={{ 
+                                color: colors[index].icon,
+                                fontWeight: 600,
+                                mb: 1,
+                                textTransform: 'uppercase',
+                                fontSize: '0.75rem',
+                                letterSpacing: '0.5px'
+                              }}
+                            >
+                              {insight.title}
+                            </Typography>
+                            <Typography 
+                              variant="body2" 
+                              sx={{ 
+                                color: '#475569',
+                                lineHeight: 1.5,
+                                fontSize: '0.875rem'
+                              }}
+                            >
+                              {insight.content}
+                            </Typography>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    ));
+                  })()}
+                </Grid>
+
+
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Professional Compliance Dashboard */}
       {complianceData && (
@@ -477,7 +838,7 @@ const ComplianceAudit = () => {
                     Regulatory Status: <strong>Well Capitalized</strong>
                   </Typography>
                   <Typography variant="body2" sx={{ opacity: 0.8, mt: 1 }}>
-                    Report Date: {complianceData.lastUpdated} | Assets: ${complianceData.actualAssets ? `$${(complianceData.actualAssets/1000).toFixed(1)}B` : '$3.8B'}
+                    Report Date: {complianceData.lastUpdated} | Data Period: Oct 2024 - Oct 2025 | Assets: ${complianceData.actualAssets ? `$${(complianceData.actualAssets/1000).toFixed(1)}B` : '$3.8B'}
                   </Typography>
                   {complianceData.actualROA && (
                     <Typography variant="body2" sx={{ opacity: 0.8, mt: 1 }}>
@@ -552,17 +913,22 @@ const ComplianceAudit = () => {
                   <Box sx={{ height: '300px' }}>
                     <Bar
                       data={{
-                        labels: ['Tier 1 Capital', 'CRE Concentration', 'ROA', 'Equity Ratio'],
+                        labels: ['Equity Ratio', 'LTD Ratio', 'ROA', 'Capital Score'],
                         datasets: [
                           {
                             label: 'Current Value',
-                            data: [7.74, 1.32, 1.42, 8.5],
+                            data: [
+                              complianceData.equityRatio || 8.5,
+                              complianceData.ltdRatio || 75,
+                              complianceData.actualROA || 1.42,
+                              complianceData.capitalAdequacy || 75
+                            ],
                             backgroundColor: '#2196F3',
                             borderRadius: 4
                           },
                           {
                             label: 'Regulatory Threshold',
-                            data: [10.5, 300, 0.8, 6.0],
+                            data: [6.0, 100, 0.8, 80],
                             backgroundColor: '#FF5722',
                             borderRadius: 4
                           }
@@ -608,11 +974,19 @@ const ComplianceAudit = () => {
                   </TableHead>
                   <TableBody>
                     <TableRow>
-                      <TableCell>Tier 1 Capital Ratio</TableCell>
-                      <TableCell align="right">7.74%</TableCell>
-                      <TableCell align="right">≥ 10.5% (Well Cap.)</TableCell>
+                      <TableCell>
+                        <Tooltip title="Percentage of assets funded by shareholders' equity. Higher ratio indicates stronger capital cushion against losses." arrow>
+                          <span style={{ cursor: 'help', borderBottom: '1px dotted #999' }}>Equity to Assets Ratio</span>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell align="right">{complianceData.equityRatio ? `${complianceData.equityRatio}%` : 'N/A'}</TableCell>
+                      <TableCell align="right">≥ 6.0%</TableCell>
                       <TableCell align="center">
-                        <Chip label="Adequate" color="warning" size="small" />
+                        <Chip 
+                          label={complianceData.equityRatio >= 8 ? 'Excellent' : complianceData.equityRatio >= 6 ? 'Good' : 'Below Min'} 
+                          color={complianceData.equityRatio >= 8 ? 'success' : complianceData.equityRatio >= 6 ? 'primary' : 'error'} 
+                          size="small" 
+                        />
                       </TableCell>
                       <TableCell align="center">
                         <Avatar sx={{ bgcolor: '#ff9800', width: 32, height: 32, fontSize: '0.875rem' }}>
@@ -621,24 +995,40 @@ const ComplianceAudit = () => {
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell>CRE Concentration</TableCell>
-                      <TableCell align="right">1.32%</TableCell>
-                      <TableCell align="right">&lt; 300%</TableCell>
+                      <TableCell>
+                        <Tooltip title="Measures how much of deposits are used for loans. Ratio above 100% may indicate liquidity stress." arrow>
+                          <span style={{ cursor: 'help', borderBottom: '1px dotted #999' }}>Loan-to-Deposit Ratio</span>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell align="right">{complianceData.ltdRatio ? `${complianceData.ltdRatio}%` : 'N/A'}</TableCell>
+                      <TableCell align="right">&lt; 100%</TableCell>
                       <TableCell align="center">
-                        <Chip label="Excellent" color="success" size="small" />
+                        <Chip 
+                          label={complianceData.ltdRatio < 80 ? 'Excellent' : complianceData.ltdRatio < 100 ? 'Good' : 'High'} 
+                          color={complianceData.ltdRatio < 80 ? 'success' : complianceData.ltdRatio < 100 ? 'primary' : 'warning'} 
+                          size="small" 
+                        />
                       </TableCell>
                       <TableCell align="center">
                         <Avatar sx={{ bgcolor: '#4caf50', width: 32, height: 32, fontSize: '0.875rem' }}>
-                          {complianceData.assetQuality}
+                          {complianceData.liquidity}
                         </Avatar>
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell>Return on Assets (ROA)</TableCell>
-                      <TableCell align="right">1.42%</TableCell>
+                      <TableCell>
+                        <Tooltip title="Net income as percentage of total assets. Measures how efficiently bank uses assets to generate profit. Industry average: 0.8-1.2%." arrow>
+                          <span style={{ cursor: 'help', borderBottom: '1px dotted #999' }}>Return on Assets (ROA)</span>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell align="right">{complianceData.actualROA ? `${complianceData.actualROA.toFixed(2)}%` : 'N/A'}</TableCell>
                       <TableCell align="right">≥ 0.8%</TableCell>
                       <TableCell align="center">
-                        <Chip label="Strong" color="success" size="small" />
+                        <Chip 
+                          label={complianceData.actualROA >= 1.2 ? 'Strong' : complianceData.actualROA >= 0.8 ? 'Good' : 'Below Min'} 
+                          color={complianceData.actualROA >= 1.2 ? 'success' : complianceData.actualROA >= 0.8 ? 'primary' : 'warning'} 
+                          size="small" 
+                        />
                       </TableCell>
                       <TableCell align="center">
                         <Avatar sx={{ bgcolor: '#9c27b0', width: 32, height: 32, fontSize: '0.875rem' }}>
@@ -647,15 +1037,23 @@ const ComplianceAudit = () => {
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell>Equity to Assets</TableCell>
-                      <TableCell align="right">8.5%</TableCell>
-                      <TableCell align="right">≥ 6.0%</TableCell>
+                      <TableCell>
+                        <Tooltip title="Net income as percentage of shareholders' equity. Measures profitability from shareholders' perspective. Industry average: 10-15%." arrow>
+                          <span style={{ cursor: 'help', borderBottom: '1px dotted #999' }}>Return on Equity (ROE)</span>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell align="right">{complianceData.actualROE ? `${complianceData.actualROE.toFixed(2)}%` : 'N/A'}</TableCell>
+                      <TableCell align="right">≥ 10.0%</TableCell>
                       <TableCell align="center">
-                        <Chip label="Good" color="primary" size="small" />
+                        <Chip 
+                          label={complianceData.actualROE >= 12 ? 'Strong' : complianceData.actualROE >= 10 ? 'Good' : 'Below Min'} 
+                          color={complianceData.actualROE >= 12 ? 'success' : complianceData.actualROE >= 10 ? 'primary' : 'warning'} 
+                          size="small" 
+                        />
                       </TableCell>
                       <TableCell align="center">
                         <Avatar sx={{ bgcolor: '#2196f3', width: 32, height: 32, fontSize: '0.875rem' }}>
-                          {complianceData.liquidity}
+                          {complianceData.assetQuality}
                         </Avatar>
                       </TableCell>
                     </TableRow>
@@ -815,4 +1213,4 @@ const ComplianceAudit = () => {
   );
 };
 
-export default ComplianceAudit;
+export default ComplianceAudit;// Build 1761397254

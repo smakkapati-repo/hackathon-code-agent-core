@@ -1,9 +1,9 @@
 # BankIQ+ Backend - ECS Fargate
 FROM public.ecr.aws/docker/library/node:18-alpine
 
-# Install Python3 and pip for PDF processing
+# Install Python3 and pip for PDF processing and SEC downloads
 RUN apk add --no-cache python3 py3-pip
-RUN pip3 install --break-system-packages --no-cache-dir PyPDF2
+RUN pip3 install --break-system-packages --no-cache-dir PyPDF2 beautifulsoup4 lxml boto3 requests
 
 # Set working directory
 WORKDIR /app
@@ -11,13 +11,16 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install dependencies (clean install)
+RUN npm ci --production --no-optional
 
-# Copy application code
-COPY server.js ./
-COPY auth-middleware.js ./
-COPY extract_pdf_metadata.py ./
+# Cache bust - copy all files at once
+COPY *.js ./
+COPY *.py ./
+
+# Create cfn/scripts directory and copy Python download script
+RUN mkdir -p ../cfn/scripts
+COPY download-single-bank.py ../cfn/scripts/
 
 # Expose port
 EXPOSE 3001

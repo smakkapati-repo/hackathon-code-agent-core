@@ -31,9 +31,9 @@ echo ""
 
 # Phase 0: Auth
 echo -e "${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${BLUE}│${NC} ${GREEN}[0/5]${NC} ${CYAN}Deploying Cognito Authentication...${NC}                ${BLUE}│${NC}"
+echo -e "${BLUE}│${NC} ${GREEN}[0/4]${NC} ${CYAN}Deploying Cognito Authentication...${NC}                ${BLUE}│${NC}"
 echo -e "${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
-${SCRIPT_DIR}/phase0-auth.sh $STACK_NAME $REGION
+${SCRIPT_DIR}/deploy-auth.sh $STACK_NAME $REGION
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Phase 0 failed${NC}"
     exit 1
@@ -42,14 +42,14 @@ echo -e "${GREEN}✅ Phase 0 Complete!${NC}\n"
 
 # Phase 1: Infrastructure (MUST BE FIRST - creates ECR repos)
 echo -e "${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${BLUE}│${NC} ${GREEN}[1/5]${NC} ${CYAN}Deploying Infrastructure (VPC, ALB, ECS, ECR)...${NC}    ${BLUE}│${NC}"
+echo -e "${BLUE}│${NC} ${GREEN}[1/4]${NC} ${CYAN}Deploying Infrastructure (VPC, ALB, ECS, ECR)...${NC}    ${BLUE}│${NC}"
 echo -e "${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
 
 INFRA_EXISTS=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-infra --region $REGION >/dev/null 2>&1 && echo "yes" || echo "no")
 if [ "$INFRA_EXISTS" = "yes" ]; then
   echo "✅ Infrastructure stack already exists - skipping"
 else
-  ${SCRIPT_DIR}/phase1-infrastructure.sh $STACK_NAME $REGION
+  ${SCRIPT_DIR}/deploy-infrastructure.sh $STACK_NAME $REGION
   if [ $? -ne 0 ]; then
       echo -e "${RED}❌ Phase 1 failed${NC}"
       exit 1
@@ -57,45 +57,68 @@ else
 fi
 echo -e "${GREEN}✅ Phase 1 Complete!${NC}\n"
 
-# Phase 2: Agent (needs ECR from infrastructure)
+# Phase 2: Agent + RAG Setup (parallel)
 echo -e "${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${BLUE}│${NC} ${GREEN}[2/5]${NC} ${CYAN}Deploying AgentCore Agent...${NC}                        ${BLUE}│${NC}"
+echo -e "${BLUE}│${NC} ${GREEN}[2/4]${NC} ${CYAN}Deploying Agent + RAG Knowledge Base...${NC}             ${BLUE}│${NC}"
 echo -e "${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
-${SCRIPT_DIR}/phase2-agent.sh
+
+echo -e "${YELLOW}Downloading SEC filings (40 files)...${NC}"
+python3 ${SCRIPT_DIR}/download-sec-filings.py
+
+# Run KB creation and agent deployment in parallel (no dependencies)
+echo -e "${YELLOW}Starting KB creation and agent deployment in parallel...${NC}"
+(
+  echo -e "${YELLOW}Creating Knowledge Base...${NC}"
+  python3 ${SCRIPT_DIR}/deploy-knowledge-base.py
+  KB_ID=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?name=='bankiq-sec-filings-kb'].knowledgeBaseId" --output text)
+  echo "$KB_ID" > /tmp/knowledge_base_id.txt
+  echo -e "${GREEN}✅ KB created: $KB_ID${NC}"
+) &
+
+(
+  echo -e "${YELLOW}Deploying AgentCore Agent...${NC}"
+  ${SCRIPT_DIR}/deploy-agent.sh
+  echo -e "${GREEN}✅ Agent deployed${NC}"
+) &
+
+wait
+echo -e "${GREEN}✅ Agent and KB deployment complete${NC}"
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Phase 2 failed${NC}"
     exit 1
 fi
-echo -e "${GREEN}✅ Phase 2 Complete!${NC}\n"
+
+KB_ID=$(cat /tmp/knowledge_base_id.txt 2>/dev/null || echo "pending")
+echo -e "${GREEN}✅ Phase 2 Complete! KB ID: $KB_ID${NC}\n"
 
 # Phase 3: Backend
 echo -e "${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${BLUE}│${NC} ${GREEN}[3/5]${NC} ${CYAN}Building & Deploying Backend Container...${NC}           ${BLUE}│${NC}"
+echo -e "${BLUE}│${NC} ${GREEN}[3/4]${NC} ${CYAN}Building & Deploying Backend Container...${NC}           ${BLUE}│${NC}"
 echo -e "${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
 
 # Backend will read agent ARN directly from .bedrock_agentcore.yaml
 
-${SCRIPT_DIR}/phase3-backend-codebuild.sh $STACK_NAME $REGION
-if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Phase 3 failed${NC}"
-    exit 1
-fi
-echo -e "${GREEN}✅ Phase 3 Complete!${NC}\n"
-
-# Phase 4: Frontend
-echo -e "${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${BLUE}│${NC} ${GREEN}[4/5]${NC} ${CYAN}Building & Deploying Frontend (React + S3)...${NC}       ${BLUE}│${NC}"
-echo -e "${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
-${SCRIPT_DIR}/phase4-frontend.sh $STACK_NAME $REGION
+${SCRIPT_DIR}/deploy-backend.sh $STACK_NAME $REGION
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Phase 4 failed${NC}"
     exit 1
 fi
 echo -e "${GREEN}✅ Phase 4 Complete!${NC}\n"
 
-# Phase 5: Update Cognito Callback URLs
+# Phase 4: Frontend
 echo -e "${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${BLUE}│${NC} ${GREEN}[5/5]${NC} ${CYAN}Updating Cognito Callback URLs...${NC}                   ${BLUE}│${NC}"
+echo -e "${BLUE}│${NC} ${GREEN}[4/4]${NC} ${CYAN}Building & Deploying Frontend (React + S3)...${NC}       ${BLUE}│${NC}"
+echo -e "${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
+${SCRIPT_DIR}/deploy-frontend.sh $STACK_NAME $REGION
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Phase 5 failed${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Phase 5 Complete!${NC}\n"
+
+# Update Cognito Callback URLs
+echo -e "${BLUE}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "${BLUE}│${NC} ${CYAN}Updating Cognito Callback URLs...${NC}                       ${BLUE}│${NC}"
 echo -e "${BLUE}└─────────────────────────────────────────────────────────────┘${NC}"
 
 CLOUDFRONT_URL=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-frontend --region $REGION --query 'Stacks[0].Outputs[?OutputKey==`ApplicationUrl`].OutputValue' --output text)
@@ -133,6 +156,14 @@ COGNITO_DOMAIN=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-a
 echo -e "${CYAN}🔐 Login URL: ${YELLOW}https://$COGNITO_DOMAIN.auth.$REGION.amazoncognito.com${NC}"
 echo -e "${CYAN}📊 View logs: ${YELLOW}aws logs tail /ecs/bankiq-backend --follow${NC}"
 echo -e "${CYAN}🔍 Monitor: ${YELLOW}agentcore status${NC}"
+
+# Show RAG status
+if [ -f /tmp/knowledge_base_id.txt ] && [ -s /tmp/knowledge_base_id.txt ]; then
+  KB_ID=$(cat /tmp/knowledge_base_id.txt)
+  echo -e "${CYAN}🧠 RAG Knowledge Base: ${YELLOW}$KB_ID${NC}"
+  echo -e "${CYAN}📁 RAG Mode: ${GREEN}Enabled${NC} (Top 10 banks, Oct 2024-Oct 2025)"
+fi
+
 echo ""
 echo -e "${YELLOW}📝 Next Steps:${NC}"
 echo "  1. Visit: $CLOUDFRONT_URL"

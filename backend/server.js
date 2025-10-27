@@ -106,6 +106,16 @@ if (AUTH_ENABLED) {
 
 // Log agent configuration
 logger.info(`Agent ARN: ${process.env.AGENTCORE_AGENT_ARN || 'Using default ARN'}`);
+
+// Log RAG configuration
+const kbId = process.env.KNOWLEDGE_BASE_ID;
+if (kbId && kbId.trim() !== '') {
+  logger.info(`RAG Mode: ENABLED`);
+  logger.info(`Knowledge Base ID: ${kbId}`);
+} else {
+  logger.info(`RAG Mode: DISABLED`);
+}
+
 logger.info('='.repeat(80));
 
 // Request logging middleware
@@ -214,11 +224,11 @@ app.post('/api/chat', async (req, res) => {
       updatedAt: new Date().toISOString()
     });
 
-    console.log(`[${new Date().toISOString()}] Chat job ${jobId} created: ${message.substring(0, 100)}...`);
+    logger.info(`Chat job ${jobId} created: ${message.substring(0, 100)}...`);
 
-    // Start processing asynchronously
+    // Start processing asynchronously (don't wait)
     processJob(jobId).catch(err => {
-      console.error(`[${new Date().toISOString()}] Chat job ${jobId} failed:`, err);
+      logger.error(`Chat job ${jobId} failed:`, err);
       const job = jobs.get(jobId);
       if (job) {
         job.status = JOB_STATUS.FAILED;
@@ -227,34 +237,15 @@ app.post('/api/chat', async (req, res) => {
       }
     });
 
-    // Poll for completion (max 2 minutes)
-    const maxAttempts = 60;
-    const intervalMs = 2000;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const job = jobs.get(jobId);
-
-      if (!job) {
-        return res.status(404).json({ error: 'Job not found' });
-      }
-
-      if (job.status === 'completed') {
-        return res.json({ response: job.result, sessionId: job.sessionId });
-      }
-
-      if (job.status === 'failed') {
-        return res.status(500).json({ error: job.error || 'Chat processing failed' });
-      }
-
-      // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, intervalMs));
-    }
-
-    // Timeout
-    return res.status(408).json({ error: 'Chat request timeout' });
+    // Return jobId immediately for client-side polling
+    return res.json({ 
+      jobId,
+      status: JOB_STATUS.PENDING,
+      message: 'Job submitted successfully'
+    });
 
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Chat endpoint error:`, error);
+    logger.error('Chat endpoint error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -302,7 +293,7 @@ async function invokeAgent(req, res) {
     logger.debug(`API Host: bedrock-agentcore.${region}.amazonaws.com`);
     logger.debug(`API Path: /runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations`);
     // Session ID must be at least 33 characters (make it 40+ to be safe)
-    const runtimeSessionId = sessionId || `session-${Date.now()}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}`;
+    const runtimeSessionId = sessionId || `session-${Date.now()}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}`;
 
     // Prepare request payload
     const payload = JSON.stringify({ prompt: inputText });
@@ -478,7 +469,7 @@ Use professional banking terminology and provide quantitative insights with spec
 
     // Extract region from ARN
     const region = agentRuntimeArn.split(':')[3] || 'us-east-1';
-    const runtimeSessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}`;
+    const runtimeSessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}`;
 
     const payload = JSON.stringify({ prompt: inputText });
     const host = `bedrock-agentcore.${region}.amazonaws.com`;
@@ -530,8 +521,13 @@ Use professional banking terminology and provide quantitative insights with spec
     });
 
     const result = JSON.parse(response.body);
+    
+    // AgentCore returns: { role: "assistant", content: [{ text: "..." }] }
     let output = 'No response';
-    if (result.content && Array.isArray(result.content) && result.content[0]?.text) {
+    if (result.role === 'assistant' && result.content && Array.isArray(result.content)) {
+      const textParts = result.content.filter(c => c.text).map(c => c.text);
+      output = textParts.join('\n');
+    } else if (result.content && Array.isArray(result.content) && result.content[0]?.text) {
       output = result.content[0].text;
     } else if (result.output) {
       output = result.output;
@@ -542,7 +538,7 @@ Use professional banking terminology and provide quantitative insights with spec
     } else if (typeof result === 'string') {
       output = result;
     } else {
-      output = result.analysis || result.text || result.content || 'No response available';
+      output = result.analysis || result.text || JSON.stringify(result);
     }
 
     console.log(`[${new Date().toISOString()}] Analysis complete`);
@@ -1096,7 +1092,7 @@ async function processJob(jobId) {
 
     // Extract region from ARN (format: arn:aws:bedrock-agentcore:REGION:account:runtime/name)
     const region = agentRuntimeArn.split(':')[3] || 'us-east-1';
-    const runtimeSessionId = job.sessionId || `session-${Date.now()}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}`;
+    const runtimeSessionId = job.sessionId || `session-${Date.now()}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}`;
 
     const payload = JSON.stringify({ prompt: job.inputText });
     const host = `bedrock-agentcore.${region}.amazonaws.com`;
@@ -1165,8 +1161,14 @@ async function processJob(jobId) {
 
     // Parse response
     const result = JSON.parse(response.body);
+    
+    // AgentCore returns: { role: "assistant", content: [{ text: "..." }] }
     let output = 'No response';
-    if (result.content && Array.isArray(result.content) && result.content[0]?.text) {
+    if (result.role === 'assistant' && result.content && Array.isArray(result.content)) {
+      // Extract text from content array
+      const textParts = result.content.filter(c => c.text).map(c => c.text);
+      output = textParts.join('\n');
+    } else if (result.content && Array.isArray(result.content) && result.content[0]?.text) {
       output = result.content[0].text;
     } else if (result.output) {
       output = result.output;
@@ -1177,7 +1179,7 @@ async function processJob(jobId) {
     } else if (typeof result === 'string') {
       output = result;
     } else {
-      output = result.analysis || result.text || result.content || 'No response available';
+      output = result.analysis || result.text || JSON.stringify(result);
     }
 
     // Update job with result
@@ -1289,6 +1291,55 @@ app.post('/api/admin/clear-cache', (req, res) => {
 });
 
 
+// ============================================================================
+// RAG ENDPOINTS - Query Bedrock Knowledge Base
+// ============================================================================
+
+const ragService = require('./rag-service');
+
+// Query RAG knowledge base
+app.post('/api/rag/query', async (req, res) => {
+  const { question, bankName, sessionId } = req.body;
+
+  if (!question) {
+    return res.status(400).json({ error: 'Missing question' });
+  }
+
+  try {
+    logger.info(`RAG query: ${question.substring(0, 100)}...`);
+    const result = await ragService.query(question, bankName, sessionId);
+    res.json(result);
+  } catch (error) {
+    logger.error('RAG query error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get available banks in RAG knowledge base
+app.get('/api/rag/banks', async (req, res) => {
+  try {
+    const banks = await ragService.getAvailableBanks();
+    res.json({ success: true, banks });
+  } catch (error) {
+    logger.error('RAG banks error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check RAG availability
+app.get('/api/rag/status', (req, res) => {
+  const kbId = process.env.KNOWLEDGE_BASE_ID;
+  const available = !!(kbId && kbId.trim() !== '');
+  
+  logger.debug(`RAG status check: ${available ? 'Available' : 'Not available'} (KB ID: ${kbId || 'not set'})`);
+  
+  res.json({
+    available,
+    kbId: available ? kbId : null,
+    message: available ? 'RAG Knowledge Base is available' : 'RAG Knowledge Base not deployed'
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`✅ BankIQ+ Backend running on port ${PORT}`);
   console.log(`   Health check: http://localhost:${PORT}/health`);
@@ -1298,4 +1349,175 @@ app.listen(PORT, () => {
   console.log(`   CSV Storage: http://localhost:${PORT}/api/store-csv-data`);
   console.log(`   CSV Analysis: http://localhost:${PORT}/api/analyze-local-data`);
   console.log(`   Bank Search: http://localhost:${PORT}/api/search-banks`);
+  console.log(`   RAG Query: http://localhost:${PORT}/api/rag/query`);
+  console.log(`   RAG Status: http://localhost:${PORT}/api/rag/status`);
+  
+  // Log RAG status on startup
+  const kbId = process.env.KNOWLEDGE_BASE_ID;
+  if (kbId && kbId.trim() !== '') {
+    console.log(`\n🧠 RAG Mode: ENABLED`);
+    console.log(`   Knowledge Base ID: ${kbId}`);
+    console.log(`   Coverage: Top 10 banks, Oct 2024-Oct 2025`);
+  } else {
+    console.log(`\n📁 RAG Mode: DISABLED (using Live SEC EDGAR)`);
+  }
+});
+
+// Get RAG indexed filings from S3
+app.post('/api/get-rag-filings', async (req, res) => {
+  const { bankName } = req.body;
+  if (!bankName) return res.status(400).json({ error: 'Missing bankName' });
+  
+  try {
+    const s3BucketName = process.env.SEC_FILINGS_BUCKET || 'bankiq-sec-filings-164543933824-prod';
+    
+    // Map bank names to S3 folder names
+    const bankFolderMap = {
+      'JPMORGAN CHASE & CO': 'JPMORGAN-CHASE',
+      'BANK OF AMERICA CORP': 'BANK-OF-AMERICA',
+      'WELLS FARGO & COMPANY': 'WELLS-FARGO',
+      'CITIGROUP INC': 'CITIGROUP',
+      'GOLDMAN SACHS GROUP INC': 'GOLDMAN-SACHS',
+      'MORGAN STANLEY': 'MORGAN-STANLEY',
+      'U.S. BANCORP': 'US-BANCORP',
+      'PNC FINANCIAL SERVICES GROUP INC': 'PNC-FINANCIAL',
+      'CAPITAL ONE FINANCIAL CORP': 'CAPITAL-ONE',
+      'TRUIST FINANCIAL CORP': 'TRUIST-FINANCIAL'
+    };
+    
+    const bankFolder = bankFolderMap[bankName.toUpperCase()] || bankName.toUpperCase()
+      .replace(/ & /g, '-')
+      .replace(/ CORP$/g, '')
+      .replace(/ INC$/g, '')
+      .replace(/ /g, '-')
+      .replace(/\./g, '');
+    
+    const AWS = require('aws-sdk');
+    const s3 = new AWS.S3({ region: process.env.AWS_REGION || 'us-east-1' });
+    
+    const response = await s3.listObjectsV2({
+      Bucket: s3BucketName,
+      Prefix: `${bankFolder}/`
+    }).promise();
+    const tenK = [], tenQ = [];
+    
+    (response.Contents || []).forEach(obj => {
+      const key = obj.Key;
+      if (key.includes('/10-K/')) {
+        const year = key.match(/(\d{4})\.txt$/)?.[1];
+        tenK.push({ form: '10-K', filing_date: `${year}-12-31`, accession: key, year });
+      } else if (key.includes('/10-Q/')) {
+        const match = key.match(/(\d{4})-Q(\d)\.txt$/);
+        if (match) {
+          const [, year, quarter] = match;
+          tenQ.push({ form: '10-Q', filing_date: `${year}-Q${quarter}`, accession: key, year, quarter });
+        }
+      }
+    });
+    
+    res.json({ success: true, '10-K': tenK, '10-Q': tenQ });
+  } catch (err) {
+    logger.error('RAG filings error:', err);
+    logger.error('RAG filings error stack:', err.stack);
+    logger.error('Bank folder attempted:', bankFolder);
+    res.json({ success: false, error: err.message, '10-K': [], '10-Q': [] });
+  }
+});
+
+// Add bank to RAG Knowledge Base
+app.post('/api/add-bank-to-rag', async (req, res) => {
+  const { bankName, cik } = req.body;
+  if (!bankName || !cik) return res.status(400).json({ error: 'Missing bankName or cik' });
+  
+  const bankFolder = bankName.toUpperCase().replace(/ & /g, '-').replace(/ CORP$/g, '').replace(/ INC$/g, '').replace(/ /g, '-').replace(/\./g, '');
+  
+  try {
+    const axios = require('axios');
+    const AWS = require('aws-sdk');
+    const s3 = new AWS.S3({ region: process.env.AWS_REGION || 'us-east-1' });
+    
+    const s3BucketName = process.env.SEC_FILINGS_BUCKET || 'bankiq-sec-filings-164543933824-prod';
+    
+    // Download filings from SEC EDGAR
+    const headers = { 'User-Agent': 'BankIQ Analytics contact@bankiq.com' };
+    const paddedCik = cik.toString().padStart(10, '0');
+    const submissionsUrl = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
+    
+    logger.info(`Fetching SEC data from: ${submissionsUrl}`);
+    
+    let submissionsResp;
+    try {
+      submissionsResp = await axios.get(submissionsUrl, { headers, timeout: 10000 });
+    } catch (axiosErr) {
+      logger.error(`SEC API error for CIK ${paddedCik}:`, axiosErr.message);
+      if (axiosErr.response) {
+        logger.error(`SEC API response status: ${axiosErr.response.status}`);
+        logger.error(`SEC API response data: ${JSON.stringify(axiosErr.response.data).substring(0, 200)}`);
+      }
+      throw new Error(`Failed to fetch SEC data: ${axiosErr.message}. CIK may be invalid or SEC.gov may be rate limiting.`);
+    }
+    
+    if (!submissionsResp.data || !submissionsResp.data.filings || !submissionsResp.data.filings.recent) {
+      throw new Error('Invalid response from SEC.gov - no filings data found');
+    }
+    
+    const filings = submissionsResp.data.filings.recent;
+    
+    const targetFilings = [];
+    for (let i = 0; i < filings.form.length; i++) {
+      const form = filings.form[i];
+      const date = filings.filingDate[i];
+      const accession = filings.accessionNumber[i];
+      
+      if ((form === '10-K' || form === '10-Q') && date >= '2024-10-01' && date <= '2025-10-31') {
+        targetFilings.push({ form, date, accession });
+      }
+    }
+    
+    logger.info(`Found ${targetFilings.length} filings for ${bankName} (Oct 2024-Oct 2025)`);
+    
+    // Spawn Python script to download and upload (it handles HTML parsing and cleaning)
+    logger.info(`Spawning Python script to download ${targetFilings.length} filings for ${bankName}...`);
+    
+    const scriptPath = path.join(__dirname, '../cfn/scripts/download-single-bank.py');
+    const pythonProcess = spawn('python3', [scriptPath, bankFolder, paddedCik, s3BucketName]);
+    
+    let output = '';
+    let errorOutput = '';
+    
+    pythonProcess.stdout.on('data', (data) => {
+      output += data.toString();
+      logger.info(`Python: ${data.toString().trim()}`);
+    });
+    
+    pythonProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+      logger.error(`Python error: ${data.toString().trim()}`);
+    });
+    
+    pythonProcess.on('close', (code) => {
+      if (code === 0) {
+        logger.info(`✅ Successfully downloaded filings for ${bankName}`);
+      } else {
+        logger.error(`❌ Python script exited with code ${code}`);
+      }
+    });
+    
+    // Return immediately - download happens in background
+    res.json({ 
+      success: true, 
+      message: `Started download of ${targetFilings.length} filings for ${bankName}. Files will appear in S3 within 1-2 minutes. Knowledge Base will sync automatically (5-10 min).`
+    });
+    
+  } catch (err) {
+    logger.error('Add bank to RAG error:', err.message);
+    logger.error('Error stack:', err.stack);
+    if (bankFolder) {
+      logger.error('Bank folder attempted:', bankFolder);
+    }
+    res.status(500).json({ 
+      error: err.message || 'Failed to add bank to RAG',
+      details: 'Check that the CIK is valid and SEC.gov is accessible'
+    });
+  }
 });

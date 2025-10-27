@@ -125,14 +125,70 @@ if [ -n "$AGENT_ECR" ]; then
   echo "✅ Agent ECR repository deleted"
 fi
 
-# Step 2.5: Delete AgentCore agent FIRST (before ECR cleanup)
+# Step 2.5: Delete RAG Knowledge Base
+echo -e "${YELLOW}🗑️  Deleting RAG Knowledge Base...${NC}"
+if command -v aws &> /dev/null; then
+  # List and delete knowledge bases
+  KB_IDS=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?contains(name, 'bankiq')].knowledgeBaseId" --output text 2>/dev/null || echo "")
+  if [ -n "$KB_IDS" ]; then
+    for KB_ID in $KB_IDS; do
+      echo "Deleting Knowledge Base: $KB_ID"
+      # Delete data sources first
+      DS_IDS=$(aws bedrock-agent list-data-sources --knowledge-base-id $KB_ID --region $REGION --query "dataSourceSummaries[].dataSourceId" --output text 2>/dev/null || echo "")
+      for DS_ID in $DS_IDS; do
+        aws bedrock-agent delete-data-source --knowledge-base-id $KB_ID --data-source-id $DS_ID --region $REGION 2>/dev/null || true
+      done
+      # Delete knowledge base
+      aws bedrock-agent delete-knowledge-base --knowledge-base-id $KB_ID --region $REGION 2>/dev/null || true
+    done
+    echo "✅ RAG Knowledge Base deletion attempted"
+  else
+    echo "⚠️  No RAG Knowledge Bases found"
+  fi
+fi
+
+# Step 2.6: Delete AgentCore agent (but keep IAM roles for redeployment)
 echo -e "${YELLOW}🗑️  Deleting AgentCore agent...${NC}"
 if command -v agentcore &> /dev/null; then
   BACKEND_DIR="$(dirname "$0")/../../backend"
   if [ -d "$BACKEND_DIR" ]; then
     cd "$BACKEND_DIR"
-    agentcore destroy --force 2>/dev/null || echo "⚠️  Agent deletion failed or agent doesn't exist"
-    echo "✅ AgentCore agent deletion attempted"
+    
+    # Get agent info before deletion
+    AGENT_ARN=$(grep 'agent_arn:' .bedrock_agentcore.yaml 2>/dev/null | awk '{print $2}' | tr -d '"')
+    
+    if [ -n "$AGENT_ARN" ]; then
+      echo "Found agent: $AGENT_ARN"
+      
+      # Delete agent via AWS CLI (more reliable than agentcore destroy)
+      echo "Deleting agent runtime..."
+      aws bedrock-agentcore delete-agent-runtime --agent-runtime-arn "$AGENT_ARN" --region $REGION 2>/dev/null && \
+        echo "✅ Agent runtime deleted" || \
+        echo "⚠️  Agent may already be deleted"
+      
+      # Delete CodeBuild project
+      AGENT_NAME=$(echo "$AGENT_ARN" | awk -F'/' '{print $2}' | awk -F'-' '{print $1}')
+      CODEBUILD_PROJECT="bedrock-agentcore-${AGENT_NAME}-builder"
+      aws codebuild delete-project --name "$CODEBUILD_PROJECT" --region $REGION 2>/dev/null && \
+        echo "✅ CodeBuild project deleted" || \
+        echo "⚠️  CodeBuild project may not exist"
+      
+      # Delete memory (if exists)
+      MEMORY_ID=$(grep 'memory_id:' .bedrock_agentcore.yaml 2>/dev/null | awk '{print $2}' | tr -d '"')
+      if [ -n "$MEMORY_ID" ]; then
+        aws bedrock-agent delete-memory --memory-id "$MEMORY_ID" --region $REGION 2>/dev/null && \
+          echo "✅ Memory deleted" || \
+          echo "⚠️  Memory may not exist or is in transitional state"
+      fi
+      
+      # Remove config file
+      rm -f .bedrock_agentcore.yaml .bedrock_agentcore.yaml.bak
+      echo "✅ Agent config removed"
+    else
+      echo "⚠️  No agent ARN found in config"
+    fi
+    
+    echo "ℹ️  Note: IAM roles preserved for redeployment"
   else
     echo "⚠️  Backend directory not found, skipping agent deletion"
   fi
@@ -200,45 +256,89 @@ echo -e "${YELLOW}🗑️  Deleting CloudFormation stacks...${NC}"
 echo "This will take 10-15 minutes..."
 echo ""
 
+# Helper function to check stack status
+get_stack_status() {
+  local STACK=$1
+  aws cloudformation describe-stacks --stack-name $STACK --region $REGION --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "NOT_FOUND"
+}
+
+# Helper function to get failed resources
+get_failed_resources() {
+  local STACK=$1
+  aws cloudformation describe-stack-resources --stack-name $STACK --region $REGION --query 'StackResources[?ResourceStatus==`DELETE_FAILED`].LogicalResourceId' --output text 2>/dev/null || echo ""
+}
+
 # Check if individual stacks exist
-FRONTEND_STACK_EXISTS=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-frontend --region $REGION >/dev/null 2>&1 && echo "yes" || echo "no")
-BACKEND_STACK_EXISTS=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-backend --region $REGION >/dev/null 2>&1 && echo "yes" || echo "no")
-BACKEND_CODEBUILD_STACK_EXISTS=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-backend-codebuild --region $REGION >/dev/null 2>&1 && echo "yes" || echo "no")
-INFRA_STACK_EXISTS=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-infra --region $REGION >/dev/null 2>&1 && echo "yes" || echo "no")
-MASTER_STACK_EXISTS=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --region $REGION >/dev/null 2>&1 && echo "yes" || echo "no")
+FRONTEND_STACK_STATUS=$(get_stack_status ${STACK_NAME}-frontend)
+BACKEND_STACK_STATUS=$(get_stack_status ${STACK_NAME}-backend)
+BACKEND_CODEBUILD_STACK_STATUS=$(get_stack_status ${STACK_NAME}-backend-codebuild)
+INFRA_STACK_STATUS=$(get_stack_status ${STACK_NAME}-infra)
+MASTER_STACK_STATUS=$(get_stack_status $STACK_NAME)
+AUTH_STACK_STATUS=$(get_stack_status ${STACK_NAME}-auth)
 
 # Delete in correct dependency order:
 # 1. Frontend (depends on infra)
 # 2. Backend (depends on infra + auth)
 # 3. Backend CodeBuild (depends on infra)
 # 4. Auth (Cognito)
-# 5. Infra (base infrastructure - MUST BE LAST because others depend on its exports)
-# 6. Master (if exists, orchestrates nested stacks)
+# 5. RAG Infrastructure (independent)
+# 6. Infra (base infrastructure - MUST BE LAST because others depend on its exports)
+# 7. Master (if exists, orchestrates nested stacks)
 
 echo "Deletion order: Frontend → Backend → Backend-CodeBuild → Auth → Infra → Master"
 echo ""
 
-if [ "$FRONTEND_STACK_EXISTS" = "yes" ]; then
-  echo "Deleting ${STACK_NAME}-frontend stack..."
-  aws cloudformation delete-stack --stack-name ${STACK_NAME}-frontend --region $REGION
+if [[ "$FRONTEND_STACK_STATUS" != "NOT_FOUND" && "$FRONTEND_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
+  echo "Deleting ${STACK_NAME}-frontend stack (status: $FRONTEND_STACK_STATUS)..."
+  
+  # Check for failed resources
+  FAILED_RESOURCES=$(get_failed_resources ${STACK_NAME}-frontend)
+  if [ -n "$FAILED_RESOURCES" ]; then
+    echo "⚠️  Found DELETE_FAILED resources: $FAILED_RESOURCES"
+    echo "Retaining failed resources and forcing deletion..."
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-frontend --region $REGION --retain-resources $FAILED_RESOURCES 2>/dev/null || \
+      aws cloudformation delete-stack --stack-name ${STACK_NAME}-frontend --region $REGION
+  else
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-frontend --region $REGION
+  fi
+  
   echo -e "${YELLOW}⏳ Waiting for frontend stack deletion...${NC}"
   aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-frontend --region $REGION 2>/dev/null || echo "⚠️  Frontend stack deletion completed with warnings"
   echo -e "${GREEN}✅ Frontend stack deleted${NC}"
   echo ""
 fi
 
-if [ "$BACKEND_STACK_EXISTS" = "yes" ]; then
-  echo "Deleting ${STACK_NAME}-backend stack..."
-  aws cloudformation delete-stack --stack-name ${STACK_NAME}-backend --region $REGION
+if [[ "$BACKEND_STACK_STATUS" != "NOT_FOUND" && "$BACKEND_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
+  echo "Deleting ${STACK_NAME}-backend stack (status: $BACKEND_STACK_STATUS)..."
+  
+  FAILED_RESOURCES=$(get_failed_resources ${STACK_NAME}-backend)
+  if [ -n "$FAILED_RESOURCES" ]; then
+    echo "⚠️  Found DELETE_FAILED resources: $FAILED_RESOURCES"
+    echo "Retaining failed resources and forcing deletion..."
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-backend --region $REGION --retain-resources $FAILED_RESOURCES 2>/dev/null || \
+      aws cloudformation delete-stack --stack-name ${STACK_NAME}-backend --region $REGION
+  else
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-backend --region $REGION
+  fi
+  
   echo -e "${YELLOW}⏳ Waiting for backend stack deletion...${NC}"
   aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-backend --region $REGION 2>/dev/null || echo "⚠️  Backend stack deletion completed with warnings"
   echo -e "${GREEN}✅ Backend stack deleted${NC}"
   echo ""
 fi
 
-if [ "$BACKEND_CODEBUILD_STACK_EXISTS" = "yes" ]; then
-  echo "Deleting ${STACK_NAME}-backend-codebuild stack..."
-  aws cloudformation delete-stack --stack-name ${STACK_NAME}-backend-codebuild --region $REGION
+if [[ "$BACKEND_CODEBUILD_STACK_STATUS" != "NOT_FOUND" && "$BACKEND_CODEBUILD_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
+  echo "Deleting ${STACK_NAME}-backend-codebuild stack (status: $BACKEND_CODEBUILD_STACK_STATUS)..."
+  
+  FAILED_RESOURCES=$(get_failed_resources ${STACK_NAME}-backend-codebuild)
+  if [ -n "$FAILED_RESOURCES" ]; then
+    echo "⚠️  Found DELETE_FAILED resources: $FAILED_RESOURCES"
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-backend-codebuild --region $REGION --retain-resources $FAILED_RESOURCES 2>/dev/null || \
+      aws cloudformation delete-stack --stack-name ${STACK_NAME}-backend-codebuild --region $REGION
+  else
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-backend-codebuild --region $REGION
+  fi
+  
   echo -e "${YELLOW}⏳ Waiting for backend-codebuild stack deletion...${NC}"
   aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-backend-codebuild --region $REGION 2>/dev/null || echo "⚠️  Backend-codebuild stack deletion completed with warnings"
   echo -e "${GREEN}✅ Backend-codebuild stack deleted${NC}"
@@ -246,30 +346,60 @@ if [ "$BACKEND_CODEBUILD_STACK_EXISTS" = "yes" ]; then
 fi
 
 # Auth stack (Cognito) - delete after backend since backend depends on it
-AUTH_STACK_EXISTS=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-auth --region $REGION >/dev/null 2>&1 && echo "yes" || echo "no")
-if [ "$AUTH_STACK_EXISTS" = "yes" ]; then
-  echo "Deleting ${STACK_NAME}-auth stack (Cognito)..."
-  aws cloudformation delete-stack --stack-name ${STACK_NAME}-auth --region $REGION
+if [[ "$AUTH_STACK_STATUS" != "NOT_FOUND" && "$AUTH_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
+  echo "Deleting ${STACK_NAME}-auth stack (Cognito, status: $AUTH_STACK_STATUS)..."
+  
+  FAILED_RESOURCES=$(get_failed_resources ${STACK_NAME}-auth)
+  if [ -n "$FAILED_RESOURCES" ]; then
+    echo "⚠️  Found DELETE_FAILED resources: $FAILED_RESOURCES"
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-auth --region $REGION --retain-resources $FAILED_RESOURCES 2>/dev/null || \
+      aws cloudformation delete-stack --stack-name ${STACK_NAME}-auth --region $REGION
+  else
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-auth --region $REGION
+  fi
+  
   echo -e "${YELLOW}⏳ Waiting for auth stack deletion...${NC}"
   aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-auth --region $REGION 2>/dev/null || echo "⚠️  Auth stack deletion completed with warnings"
   echo -e "${GREEN}✅ Auth stack deleted${NC}"
   echo ""
 fi
 
+# RAG resources are now part of main infrastructure stack (bankiq-infra)
+# SEC filings bucket will be cleaned up with infrastructure stack
+
 # Infra must be deleted LAST because frontend and backend depend on its exports
-if [ "$INFRA_STACK_EXISTS" = "yes" ]; then
-  echo "Deleting ${STACK_NAME}-infra stack (base infrastructure - LAST)..."
-  aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION
-  echo -e "${YELLOW}⏳ Waiting for infra stack deletion...${NC}"
+if [[ "$INFRA_STACK_STATUS" != "NOT_FOUND" && "$INFRA_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
+  echo "Deleting ${STACK_NAME}-infra stack (base infrastructure - LAST, status: $INFRA_STACK_STATUS)..."
+  
+  FAILED_RESOURCES=$(get_failed_resources ${STACK_NAME}-infra)
+  if [ -n "$FAILED_RESOURCES" ]; then
+    echo "⚠️  Found DELETE_FAILED resources: $FAILED_RESOURCES"
+    echo "Retaining failed resources and forcing deletion..."
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION --retain-resources $FAILED_RESOURCES 2>/dev/null || \
+      aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION
+  else
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION
+  fi
+  
+  echo -e "${YELLOW}⏳ Waiting for infra stack deletion (may take 5-10 minutes)...${NC}"
   aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Infra stack deletion completed with warnings"
   echo -e "${GREEN}✅ Infra stack deleted${NC}"
   echo ""
 fi
 
 # Master stack (if using nested stacks pattern)
-if [ "$MASTER_STACK_EXISTS" = "yes" ]; then
-  echo "Deleting ${STACK_NAME} master stack..."
-  aws cloudformation delete-stack --stack-name $STACK_NAME --region $REGION
+if [[ "$MASTER_STACK_STATUS" != "NOT_FOUND" && "$MASTER_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
+  echo "Deleting ${STACK_NAME} master stack (status: $MASTER_STACK_STATUS)..."
+  
+  FAILED_RESOURCES=$(get_failed_resources $STACK_NAME)
+  if [ -n "$FAILED_RESOURCES" ]; then
+    echo "⚠️  Found DELETE_FAILED resources: $FAILED_RESOURCES"
+    aws cloudformation delete-stack --stack-name $STACK_NAME --region $REGION --retain-resources $FAILED_RESOURCES 2>/dev/null || \
+      aws cloudformation delete-stack --stack-name $STACK_NAME --region $REGION
+  else
+    aws cloudformation delete-stack --stack-name $STACK_NAME --region $REGION
+  fi
+  
   echo -e "${YELLOW}⏳ Waiting for master stack deletion...${NC}"
   aws cloudformation wait stack-delete-complete --stack-name $STACK_NAME --region $REGION 2>/dev/null || echo "⚠️  Master stack deletion completed with warnings"
   echo -e "${GREEN}✅ Master stack deleted${NC}"
@@ -278,6 +408,9 @@ fi
 
 echo ""
 echo -e "${GREEN}✅ All stacks deleted successfully!${NC}"
+echo ""
+echo -e "${YELLOW}ℹ️  Note: AgentCore IAM roles preserved for faster redeployment${NC}"
+echo "   To delete roles manually: aws iam delete-role --role-name AmazonBedrockAgentCoreSDKRuntime-${REGION}-${STACK_NAME}"
 
 # Step 5: Clean up temporary files
 echo ""
@@ -298,27 +431,36 @@ delete_bucket_with_versions() {
   aws s3 rm s3://$BUCKET --recursive --region $REGION 2>/dev/null || true
   
   # Loop to delete all versions (in case there are more than 1000)
-  local HAS_VERSIONS="yes"
-  while [ "$HAS_VERSIONS" = "yes" ]; do
-    local VERSIONS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)
+  local MAX_ITERATIONS=100
+  local ITERATION=0
+  while [ $ITERATION -lt $MAX_ITERATIONS ]; do
+    local VERSION_COUNT=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query 'length(Versions)' --output text 2>/dev/null || echo "0")
     
-    if [ "$VERSIONS" != "" ] && [ "$VERSIONS" != "{}" ] && [ "$VERSIONS" != '{"Objects":null}' ]; then
-      aws s3api delete-objects --bucket $BUCKET --delete "$VERSIONS" --region $REGION 2>/dev/null || true
-    else
-      HAS_VERSIONS="no"
+    if [ "$VERSION_COUNT" = "0" ] || [ "$VERSION_COUNT" = "None" ] || [ -z "$VERSION_COUNT" ]; then
+      break
     fi
+    
+    echo "  Deleting $VERSION_COUNT versions (iteration $((ITERATION+1)))..."
+    local VERSIONS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)
+    aws s3api delete-objects --bucket $BUCKET --delete "$VERSIONS" --region $REGION 2>/dev/null || true
+    
+    ITERATION=$((ITERATION+1))
   done
   
   # Loop to delete all delete markers
-  local HAS_MARKERS="yes"
-  while [ "$HAS_MARKERS" = "yes" ]; do
-    local MARKERS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)
+  ITERATION=0
+  while [ $ITERATION -lt $MAX_ITERATIONS ]; do
+    local MARKER_COUNT=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query 'length(DeleteMarkers)' --output text 2>/dev/null || echo "0")
     
-    if [ "$MARKERS" != "" ] && [ "$MARKERS" != "{}" ] && [ "$MARKERS" != '{"Objects":null}' ]; then
-      aws s3api delete-objects --bucket $BUCKET --delete "$MARKERS" --region $REGION 2>/dev/null || true
-    else
-      HAS_MARKERS="no"
+    if [ "$MARKER_COUNT" = "0" ] || [ "$MARKER_COUNT" = "None" ] || [ -z "$MARKER_COUNT" ]; then
+      break
     fi
+    
+    echo "  Deleting $MARKER_COUNT delete markers (iteration $((ITERATION+1)))..."
+    local MARKERS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)
+    aws s3api delete-objects --bucket $BUCKET --delete "$MARKERS" --region $REGION 2>/dev/null || true
+    
+    ITERATION=$((ITERATION+1))
   done
   
   # Delete bucket
@@ -386,7 +528,8 @@ echo "  ✅ VPC, subnets, security groups"
 echo "  ✅ IAM roles"
 echo "  ✅ Cognito User Pool"
 echo "  ✅ CloudWatch log groups"
-echo "  ✅ AgentCore agent"
+echo "  ✅ AgentCore agent (runtime and memory)"
+echo "  ℹ️  IAM roles preserved for redeployment"
 echo ""
 echo -e "${YELLOW}Note: Some resources may take a few minutes to fully delete${NC}"
 echo ""

@@ -198,6 +198,27 @@ Resources:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
+  SECFilingsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-sec-filings-${AWS::AccountId}-${Environment}'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+
   # ============================================================================
   # IAM ROLES
   # ============================================================================
@@ -264,6 +285,8 @@ Resources:
                 Resource:
                   - !GetAtt UploadedDocsBucket.Arn
                   - !Sub '${UploadedDocsBucket.Arn}/*'
+                  - !GetAtt SECFilingsBucket.Arn
+                  - !Sub '${SECFilingsBucket.Arn}/*'
 
   AgentCoreExecutionRole:
     Type: AWS::IAM::Role
@@ -342,6 +365,144 @@ Resources:
                   - s3:PutObject
                 Resource: '*'
 
+  # ============================================================================
+  # RAG INFRASTRUCTURE - Bedrock Knowledge Base
+  # ============================================================================
+
+  BedrockKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-BedrockKB-Role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt SECFilingsBucket.Arn
+                  - !Sub '${SECFilingsBucket.Arn}/*'
+        - PolicyName: BedrockModelAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0'
+        - PolicyName: OpenSearchServerlessAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource:
+                  - !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*'
+
+  VectorStoreCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    DependsOn:
+      - VectorStoreEncryptionPolicy
+      - VectorStoreNetworkPolicy
+    Properties:
+      Name: !Sub '${ProjectName}-vectors-${Environment}'
+      Type: VECTORSEARCH
+      Description: Vector store for BankIQ SEC filings
+
+  VectorStoreAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    DependsOn: 
+      - VectorStoreCollection
+      - BedrockKnowledgeBaseRole
+    Properties:
+      Name: !Sub '${ProjectName}-vectors-access-${Environment}'
+      Type: data
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "index",
+                "Resource": ["index/${ProjectName}-vectors-${Environment}/*"],
+                "Permission": [
+                  "aoss:CreateIndex",
+                  "aoss:DeleteIndex",
+                  "aoss:UpdateIndex",
+                  "aoss:DescribeIndex",
+                  "aoss:ReadDocument",
+                  "aoss:WriteDocument"
+                ]
+              },
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/${ProjectName}-vectors-${Environment}"],
+                "Permission": [
+                  "aoss:CreateCollectionItems",
+                  "aoss:DeleteCollectionItems",
+                  "aoss:UpdateCollectionItems",
+                  "aoss:DescribeCollectionItems"
+                ]
+              }
+            ],
+            "Principal": [
+              "${BedrockKnowledgeBaseRole.Arn}",
+              "arn:aws:iam::${AWS::AccountId}:root"
+            ]
+          }
+        ]
+
+  VectorStoreEncryptionPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub '${ProjectName}-vectors-encryption-${Environment}'
+      Type: encryption
+      Policy: !Sub |
+        {
+          "Rules": [
+            {
+              "ResourceType": "collection",
+              "Resource": ["collection/${ProjectName}-vectors-${Environment}"]
+            }
+          ],
+          "AWSOwnedKey": true
+        }
+
+  VectorStoreNetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub '${ProjectName}-vectors-network-${Environment}'
+      Type: network
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/${ProjectName}-vectors-${Environment}"]
+              },
+              {
+                "ResourceType": "dashboard",
+                "Resource": ["collection/${ProjectName}-vectors-${Environment}"]
+              }
+            ],
+            "AllowFromPublic": true
+          }
+        ]
+
 Outputs:
   StackName:
     Description: Stack name for cross-stack references
@@ -408,3 +569,33 @@ Outputs:
     Value: !GetAtt AgentCoreCodeBuildRole.Arn
     Export:
       Name: !Sub '${AWS::StackName}-AgentCoreCodeBuildRoleArn'
+
+  SECFilingsBucketName:
+    Description: S3 bucket for SEC filings (RAG)
+    Value: !Ref SECFilingsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-SECFilingsBucket'
+
+  SECFilingsBucketArn:
+    Description: ARN of SEC filings bucket
+    Value: !GetAtt SECFilingsBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SECFilingsBucketArn'
+
+  BedrockKnowledgeBaseRoleArn:
+    Description: IAM role for Bedrock Knowledge Base
+    Value: !GetAtt BedrockKnowledgeBaseRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BedrockKBRole'
+
+  VectorStoreCollectionEndpoint:
+    Description: OpenSearch Serverless collection endpoint
+    Value: !GetAtt VectorStoreCollection.CollectionEndpoint
+    Export:
+      Name: !Sub '${AWS::StackName}-VectorStoreEndpoint'
+
+  VectorStoreCollectionArn:
+    Description: OpenSearch Serverless collection ARN
+    Value: !GetAtt VectorStoreCollection.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-VectorStoreArn'

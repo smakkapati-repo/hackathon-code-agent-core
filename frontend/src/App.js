@@ -11,6 +11,7 @@ import { Amplify } from 'aws-amplify';
 import { fetchAuthSession, signOut, signInWithRedirect } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { cognitoConfig } from './config';
+import { AppStateProvider } from './context/AppStateContext';
 import Home from './components/Home';
 import PeerAnalytics from './components/PeerAnalytics';
 import FinancialReports from './components/FinancialReports';
@@ -192,6 +193,7 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <AppStateProvider>
       <Box sx={{ flexGrow: 1 }}>
         <AppBar position="static" elevation={0} sx={{ background: 'linear-gradient(135deg, #A020F0 0%, #8B1A9B 100%)' }}>
           <Toolbar>
@@ -235,6 +237,7 @@ function App() {
           </TabPanel>
         </Container>
       </Box>
+      </AppStateProvider>
     </ThemeProvider>
   );
 }

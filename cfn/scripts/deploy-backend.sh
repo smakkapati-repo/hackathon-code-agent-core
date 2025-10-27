@@ -223,6 +223,12 @@ SUBNET_IDS=$(echo "$SUBNET_IDS" | xargs)
 echo "DEBUG: VPC_ID=$VPC_ID"
 echo "DEBUG: SUBNET_IDS=$SUBNET_IDS"
 
+# Get Knowledge Base ID if RAG was deployed
+KB_ID=""
+if [ -f /tmp/knowledge_base_id.txt ]; then
+  KB_ID=$(cat /tmp/knowledge_base_id.txt)
+fi
+
 # Create parameters JSON to avoid CLI parsing issues (Windows compatible)
 mkdir -p temp
 cat > temp/backend-params.json << EOF
@@ -233,7 +239,8 @@ cat > temp/backend-params.json << EOF
   {"ParameterKey": "AgentArn", "ParameterValue": "$AGENT_ARN"},
   {"ParameterKey": "VpcId", "ParameterValue": "$VPC_ID"},
   {"ParameterKey": "SubnetIds", "ParameterValue": "$SUBNET_IDS"},
-  {"ParameterKey": "BackendImageTag", "ParameterValue": "latest"}
+  {"ParameterKey": "BackendImageTag", "ParameterValue": "latest"},
+  {"ParameterKey": "KnowledgeBaseId", "ParameterValue": "$KB_ID"}
 ]
 EOF
 
