@@ -252,7 +252,9 @@ Amazon Bedrock AgentCore is a **managed agent runtime** that handles:
 
 # Install required tools
 brew install awscli node python@3.11 git
-pip install bedrock-agentcore-starter-toolkit
+
+# Install Python dependencies
+pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests
 ```
 
 **Windows (PowerShell as Administrator):**
@@ -260,7 +262,9 @@ pip install bedrock-agentcore-starter-toolkit
 # Install Chocolatey + all tools
 Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 choco install python git awscli nodejs jq -y
-pip install bedrock-agentcore-starter-toolkit
+
+# Install Python dependencies
+pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests
 
 # Add Python Scripts to PATH permanently (for agentcore command)
 echo 'export PATH="$PATH:/d/Users/$USER/AppData/Roaming/Python/Python314/Scripts"' >> ~/.bashrc
