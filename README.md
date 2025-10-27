@@ -257,7 +257,7 @@ Amazon Bedrock AgentCore is a **managed agent runtime** that handles:
 brew install awscli node python@3.11 git
 
 # Install Python dependencies
-pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests
+pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests lxml
 ```
 
 **Windows (PowerShell as Administrator):**
@@ -267,7 +267,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 choco install python git awscli nodejs jq -y
 
 # Install Python dependencies
-pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests
+pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests lxml
 
 # Add Python Scripts to PATH permanently (for agentcore command)
 echo 'export PATH="$PATH:/d/Users/$USER/AppData/Roaming/Python/Python314/Scripts"' >> ~/.bashrc
