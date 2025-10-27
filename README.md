@@ -304,9 +304,18 @@ aws configure
 
 **Step 3: Deploy Everything (One Command)**
 
-**Mac/Linux/Windows:**
+**Mac/Linux:**
 ```bash
 cd hackathon-code-agent-core
+./cfn/scripts/deploy-all.sh
+# RAG Knowledge Base is automatically deployed
+```
+
+**Windows (Git Bash):**
+```bash
+cd hackathon-code-agent-core
+# Set region explicitly (required for Windows Git Bash)
+export AWS_DEFAULT_REGION=us-east-1  # or your preferred region
 ./cfn/scripts/deploy-all.sh
 # RAG Knowledge Base is automatically deployed
 ```
