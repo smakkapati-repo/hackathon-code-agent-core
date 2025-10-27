@@ -371,6 +371,16 @@ fi
 if [[ "$INFRA_STACK_STATUS" != "NOT_FOUND" && "$INFRA_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
   echo "Deleting ${STACK_NAME}-infra stack (base infrastructure - LAST, status: $INFRA_STACK_STATUS)..."
   
+  # If stack is in DELETE_FAILED state, manually delete the SEC filings bucket first
+  if [[ "$INFRA_STACK_STATUS" == "DELETE_FAILED" ]]; then
+    echo "⚠️  Stack is in DELETE_FAILED state, cleaning up failed resources..."
+    SEC_BUCKET=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-infra --region $REGION --query 'Stacks[0].Outputs[?OutputKey==`SECFilingsBucketName`].OutputValue' --output text 2>/dev/null || echo "")
+    if [ -n "$SEC_BUCKET" ]; then
+      echo "Manually deleting SEC filings bucket: $SEC_BUCKET"
+      delete_bucket_with_versions $SEC_BUCKET 2>/dev/null || true
+    fi
+  fi
+  
   FAILED_RESOURCES=$(get_failed_resources ${STACK_NAME}-infra)
   if [ -n "$FAILED_RESOURCES" ]; then
     echo "⚠️  Found DELETE_FAILED resources: $FAILED_RESOURCES"
@@ -383,6 +393,15 @@ if [[ "$INFRA_STACK_STATUS" != "NOT_FOUND" && "$INFRA_STACK_STATUS" != "DELETE_C
   
   echo -e "${YELLOW}⏳ Waiting for infra stack deletion (may take 5-10 minutes)...${NC}"
   aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Infra stack deletion completed with warnings"
+  
+  # Retry if still in DELETE_FAILED state
+  RETRY_STATUS=$(get_stack_status ${STACK_NAME}-infra)
+  if [[ "$RETRY_STATUS" == "DELETE_FAILED" ]]; then
+    echo "⚠️  Stack still in DELETE_FAILED, retrying deletion..."
+    aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION
+    aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Retry completed"
+  fi
+  
   echo -e "${GREEN}✅ Infra stack deleted${NC}"
   echo ""
 fi
