@@ -43,6 +43,62 @@ def get_fdic_data() -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 @tool
+def get_bank_fdic_data(bank_name: str) -> str:
+    """Get FDIC financial data for a single bank (for compliance dashboard).
+    
+    Args:
+        bank_name: Bank name to get data for
+    
+    Returns: JSON with ROA, ROE, ASSET, EQTOT, DEP, LNLSNET for last 20 quarters
+    Use when: Need compliance/regulatory data for one specific bank
+    Examples: "Get FDIC data for Wells Fargo", "Compliance data for JPMorgan"""
+    try:
+        # First, find the bank's CERT number
+        cert_result = search_fdic_bank(bank_name)
+        cert_data = json.loads(cert_result)
+        
+        if not cert_data.get('success'):
+            return json.dumps({"success": False, "error": "Bank not found"})
+        
+        cert_number = cert_data['cert']
+        
+        # Get financial data using CERT number
+        # First, get total count to calculate offset for most recent data
+        url = "https://api.fdic.gov/banks/financials"
+        count_params = {
+            "filters": f"CERT:{cert_number}",
+            "fields": "ASSET",
+            "limit": 1,
+            "format": "json"
+        }
+        
+        count_response = requests.get(url, params=count_params, timeout=10)
+        if count_response.status_code != 200:
+            return json.dumps({"success": False, "error": f"FDIC API error: {count_response.status_code}"})
+        
+        total_records = count_response.json().get("meta", {}).get("total", 0)
+        
+        # Calculate offset to get last 20 records (most recent)
+        offset = max(0, total_records - 20)
+        
+        params = {
+            "filters": f"CERT:{cert_number}",
+            "fields": "ASSET,DEP,NETINC,ROA,ROE,EQTOT,LNLSNET,NCLNLS,LNATRES,RBCT1J,NIMY",
+            "limit": 20,
+            "offset": offset,
+            "format": "json"
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return json.dumps({"success": True, "data": data.get("data", [])})
+        else:
+            return json.dumps({"success": False, "error": f"FDIC API error: {response.status_code}"})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+@tool
 def search_fdic_bank(bank_name: str) -> str:
     """Search FDIC database for bank CERT number by name.
     
@@ -53,14 +109,53 @@ def search_fdic_bank(bank_name: str) -> str:
     Use when: Need CERT number for banks not in hardcoded list
     Examples: "Find CERT for Regional Bank", "What's the CERT for XYZ Bank"""
     try:
-        # Clean bank name - remove common suffixes
-        clean_name = bank_name.upper()
-        for suffix in [' CORP', ' INC', ' & CO', ' FINANCIAL', ' BANCORP', ' BANK']:
-            clean_name = clean_name.replace(suffix, '')
-        clean_name = clean_name.strip()
+        # Hardcoded CERT numbers for top 10 banks (instant lookup)
+        top_banks_cert = {
+            'JPMORGAN': {'cert': '628', 'name': 'JPMorgan Chase Bank'},
+            'BANK OF AMERICA': {'cert': '3510', 'name': 'Bank of America'},
+            'WELLS FARGO': {'cert': '3511', 'name': 'Wells Fargo Bank'},
+            'CITIGROUP': {'cert': '7213', 'name': 'Citibank'},
+            'CITIBANK': {'cert': '7213', 'name': 'Citibank'},
+            'GOLDMAN SACHS': {'cert': '32992', 'name': 'Morgan Stanley Bank'},
+            'MORGAN STANLEY': {'cert': '32992', 'name': 'Morgan Stanley Bank'},
+            'U.S. BANCORP': {'cert': '6548', 'name': 'U.S. Bank'},
+            'PNC': {'cert': '6384', 'name': 'PNC Bank'},
+            'CAPITAL ONE': {'cert': '33954', 'name': 'Capital One'},
+            'TRUIST': {'cert': '11069', 'name': 'Truist Bank'}
+        }
         
-        # Try multiple search strategies
-        search_terms = [clean_name, bank_name.split()[0]]
+        # Check hardcoded list first
+        bank_upper = bank_name.upper()
+        for key, value in top_banks_cert.items():
+            if key in bank_upper:
+                return json.dumps({
+                    "success": True,
+                    "cert": value['cert'],
+                    "name": value['name'],
+                    "asset": 0
+                })
+        
+        # Extract core bank name (first significant word)
+        words = bank_name.upper().split()
+        # Remove common corporate suffixes
+        stop_words = {'CORP', 'INC', 'CO', 'FINANCIAL', 'BANCORP', 'BANCSHARES', 'GROUP', 'CORPORATION', 'COMPANY', 'HOLDING', 'HOLDINGS', 'THE', '&', 'AND'}
+        core_words = [w for w in words if w not in stop_words]
+        
+        if not core_words:
+            core_words = [words[0]]  # Fallback to first word
+        
+        # Generate search variations
+        search_terms = [
+            ' '.join(core_words),                    # e.g., "SYNCHRONY"
+            f"{core_words[0]} BANK",                # e.g., "SYNCHRONY BANK"
+            f"{core_words[0]} NATIONAL BANK",      # e.g., "SYNCHRONY NATIONAL BANK"
+            core_words[0],                           # e.g., "SYNCHRONY"
+            bank_name.upper()                        # Original name
+        ]
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        search_terms = [x for x in search_terms if not (x in seen or seen.add(x))]
         
         for term in search_terms:
             url = f"https://api.fdic.gov/banks/institutions?search=NAME:{term}&fields=CERT,NAME,ASSET,ACTIVE&limit=50&format=json"
@@ -595,15 +690,15 @@ def analyze_csv_peer_performance(s3_key: str, base_bank: str, peer_banks: List[s
 
 @tool
 def analyze_and_upload_pdf(file_content: str, filename: str) -> str:
-    """Analyze PDF document and upload to S3.
+    """Upload PDF document to S3 for analysis.
     
     Args:
         file_content: Document content (base64 encoded)
         filename: Name of the file
     
-    Returns: Document metadata (bank name, form type, year) and S3 key after Claude analysis
+    Returns: Document metadata and S3 key. Agent will analyze content separately using extract_pdf_text.
     Use when: User uploads financial documents (PDFs, reports) for the first time
-    Examples: "Upload this 10-K report", "Analyze this PDF document"""
+    Examples: "Upload this 10-K report", "Store this PDF document"""
     
     try:
         import uuid
@@ -615,61 +710,20 @@ def analyze_and_upload_pdf(file_content: str, filename: str) -> str:
         except:
             return json.dumps({"success": False, "error": "Invalid base64 content"})
         
-        # Use Claude to analyze the PDF document
-        try:
-            response = bedrock.converse(
-                modelId="us.anthropic.claude-sonnet-4-20250514-v1:0",
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {
-                            "document": {
-                                "format": "pdf",
-                                "name": filename,
-                                "source": {
-                                    "bytes": content
-                                }
-                            }
-                        },
-                        {
-                            "text": """Analyze this financial document and extract:
-1. Bank/Company Name (full legal name)
-2. Document Type (10-K, 10-Q, or other)
-3. Fiscal Year
-
-Return ONLY a JSON object in this exact format:
-{"bank_name": "Webster Financial Corporation", "form_type": "10-K", "year": 2024}
-
-Be precise with the bank name as it appears in the document header."""
-                        }
-                    ]
-                }],
-                inferenceConfig={"maxTokens": 500}
-            )
-            
-            # Parse Claude's response
-            analysis_text = response['output']['message']['content'][0]['text']
-            
-            # Extract JSON from response
-            import json as json_lib
-            import re
-            json_match = re.search(r'\{[^}]+\}', analysis_text)
-            if json_match:
-                doc_info = json_lib.loads(json_match.group(0))
-                bank_name = doc_info.get('bank_name', 'Unknown Bank')
-                form_type = doc_info.get('form_type', '10-K')
-                year = doc_info.get('year', 2024)
-            else:
-                # Fallback
-                bank_name = "Unknown Bank"
-                form_type = "10-K"
-                year = 2024
-                
-        except Exception as e:
-            # Fallback if Claude analysis fails
-            bank_name = filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ').title()
+        # Extract basic metadata from filename (agent will do detailed analysis)
+        bank_name = filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ').title()
+        
+        # Detect form type from filename
+        form_type = "10-K"
+        if "10-q" in filename.lower() or "10q" in filename.lower():
+            form_type = "10-Q"
+        elif "10-k" in filename.lower() or "10k" in filename.lower():
             form_type = "10-K"
-            year = 2024
+        
+        # Detect year from filename
+        import re
+        year_match = re.search(r'20\d{2}', filename)
+        year = int(year_match.group(0)) if year_match else 2024
         
         # Upload to S3
         bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-164543933824-prod')
@@ -696,7 +750,8 @@ Be precise with the bank name as it appears in the document header."""
             "bank_name": bank_name,
             "form_type": form_type,
             "year": year,
-            "size": len(content)
+            "size": len(content),
+            "note": "Document uploaded. Use extract_pdf_text tool to read content for detailed analysis."
         })
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
@@ -844,141 +899,182 @@ def compliance_risk_assessment(bank_name: str) -> str:
     Examples: "Assess compliance risk for JPMorgan", "Regulatory risk analysis"""
     
     try:
-        # Check cache first (1 hour TTL for compliance data)
-        import hashlib
-        cache_key = f"compliance:{hashlib.md5(bank_name.upper().encode()).hexdigest()}"
+        # Use get_bank_fdic_data which has offset fix for recent data
+        fdic_response = get_bank_fdic_data(bank_name)
+        fdic_result = json.loads(fdic_response)
         
-        # Simple in-memory cache (in production, use Redis or DynamoDB)
-        if not hasattr(compliance_risk_assessment, '_cache'):
-            compliance_risk_assessment._cache = {}
-            compliance_risk_assessment._cache_times = {}
-        
-        import time
-        current_time = time.time()
-        cache_ttl = 3600  # 1 hour
-        
-        if (cache_key in compliance_risk_assessment._cache and 
-            current_time - compliance_risk_assessment._cache_times.get(cache_key, 0) < cache_ttl):
-            return compliance_risk_assessment._cache[cache_key]
-        
-        # Get CERT number for the bank first
-        cert_response = search_fdic_bank(bank_name)
-        cert_data = json.loads(cert_response)
-        
-        if not cert_data.get('success'):
+        if not fdic_result.get('success'):
             return json.dumps({"success": False, "error": f"Bank not found in FDIC database: {bank_name}"})
         
-        cert = cert_data['cert']
+        records = fdic_result.get('data', [])
         
-        # Query FDIC by CERT number to get real data
-        url = f"https://api.fdic.gov/banks/financials?filters=CERT:{cert}&fields=ASSET,DEP,NETINC,ROA,ROE,EQTOT,LNLSNET&limit=500&format=json"
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200:
-            return json.dumps({"success": False, "error": f"FDIC API error: {response.status_code}"})
+        if not records:
+            return json.dumps({"success": False, "error": f"No FDIC data available for {bank_name}"})
         
-        fdic_data = response.json()
-        records = fdic_data.get('data', [])
-        
-        # Filter to 2024-2025 data
-        recent_records = []
-        for r in records:
-            id_parts = r['data']['ID'].split('_')
-            if len(id_parts) == 2:
-                date_str = id_parts[1]
-                if date_str.startswith('2024') or date_str.startswith('2025'):
-                    recent_records.append(r)
-        
-        if not recent_records:
-            return json.dumps({"success": False, "error": f"No 2024-2025 FDIC data available for {bank_name}"})
-        
-        # Sort by date descending and get most recent
-        recent_records.sort(key=lambda x: x['data']['ID'], reverse=True)
-        bank_data = recent_records[0]['data']
+        # Get most recent record (last in array)
+        bank_data = records[-1]['data']
         
         if not bank_data:
             return json.dumps({"success": False, "error": f"No financial data found for {bank_name}"})
         
-        # Calculate compliance scores
+        # Extract financial metrics
         roa = float(bank_data.get('ROA', 0) or 0)
         roe = float(bank_data.get('ROE', 0) or 0)
         assets = float(bank_data.get('ASSET', 0) or 0)
         equity = float(bank_data.get('EQTOT', 0) or 0)
-        
-        # Risk scoring logic with real FDIC data using regulatory thresholds
         loans = float(bank_data.get('LNLSNET', 0) or 0)
         deposits = float(bank_data.get('DEP', 1) or 1)
-        net_income = float(bank_data.get('NETINC', 0) or 0)
-        
-        # Capital Adequacy: Equity-to-Assets ratio (regulatory minimum 4%, well-capitalized 5%+)
-        equity_ratio = (equity / assets * 100) if assets > 0 else 0
-        if equity_ratio >= 10:
-            capital_score = 95 + min(5, (equity_ratio - 10) * 2)
-        elif equity_ratio >= 8:
-            capital_score = 85 + (equity_ratio - 8) * 5
-        elif equity_ratio >= 6:
-            capital_score = 70 + (equity_ratio - 6) * 7.5
-        elif equity_ratio >= 5:
-            capital_score = 55 + (equity_ratio - 5) * 15
+        npl = float(bank_data.get('NCLNLS', 0) or 0)  # Noncurrent loans
+        allowance = float(bank_data.get('LNATRES', 0) or 0)  # Loan loss allowance
+        # RBCT1J from FDIC is sometimes in thousands of dollars, not percentage
+        # If value > 100, it's likely raw dollars, calculate ratio manually
+        tier1_raw = float(bank_data.get('RBCT1J', 0) or 0)
+        if tier1_raw > 100:
+            # It's raw dollars, calculate ratio: (tier1_capital / assets) * 100
+            tier1_ratio = (tier1_raw / assets * 100) if assets > 0 else 0
         else:
-            capital_score = max(20, equity_ratio * 11)
+            # It's already a percentage
+            tier1_ratio = tier1_raw
+        nim = float(bank_data.get('NIMY', 0) or 0)  # Net Interest Margin
         
-        # Profitability: ROA (good >1.0%, adequate 0.5-1.0%, weak <0.5%)
+        # === CAPITAL ADEQUACY (25% weight) - Basel III aligned ===
+        # Use Tier 1 ratio if available, otherwise leverage ratio
+        if tier1_ratio > 0:
+            capital_ratio = tier1_ratio
+            # Basel III: 6% minimum, 8% well-capitalized, 10%+ strong
+            if capital_ratio >= 10:
+                capital_score = 95 + min(5, (capital_ratio - 10) * 0.5)
+            elif capital_ratio >= 8:
+                capital_score = 80 + (capital_ratio - 8) * 7.5
+            elif capital_ratio >= 6:
+                capital_score = 60 + (capital_ratio - 6) * 10
+            elif capital_ratio >= 4.5:
+                capital_score = 40 + (capital_ratio - 4.5) * 13.3
+            else:
+                capital_score = max(10, capital_ratio * 8.9)
+        else:
+            # Fallback: Leverage ratio (equity/assets)
+            capital_ratio = (equity / assets * 100) if assets > 0 else 0
+            # Leverage ratio: 4% minimum, 5% well-capitalized
+            if capital_ratio >= 8:
+                capital_score = 90 + min(10, (capital_ratio - 8) * 1.25)
+            elif capital_ratio >= 5:
+                capital_score = 70 + (capital_ratio - 5) * 6.7
+            elif capital_ratio >= 4:
+                capital_score = 50 + (capital_ratio - 4) * 20
+            else:
+                capital_score = max(10, capital_ratio * 12.5)
+        
+        # === ASSET QUALITY (25% weight) - NPL ratio based ===
+        npl_ratio = (npl / loans * 100) if loans > 0 else 0
+        coverage_ratio = (allowance / npl * 100) if npl > 0 else 100
+        
+        # NPL ratio: <1% excellent, 1-2% good, 2-3% adequate, >3% poor
+        if npl_ratio < 0.5:
+            npl_score = 95 + min(5, (0.5 - npl_ratio) * 10)
+        elif npl_ratio < 1.0:
+            npl_score = 85 + (1.0 - npl_ratio) * 20
+        elif npl_ratio < 2.0:
+            npl_score = 65 + (2.0 - npl_ratio) * 20
+        elif npl_ratio < 3.0:
+            npl_score = 45 + (3.0 - npl_ratio) * 20
+        else:
+            npl_score = max(10, 45 - (npl_ratio - 3.0) * 10)
+        
+        # Coverage ratio: >100% good, 70-100% adequate, <70% weak
+        if coverage_ratio >= 100:
+            coverage_score = 90 + min(10, (coverage_ratio - 100) * 0.1)
+        elif coverage_ratio >= 70:
+            coverage_score = 60 + (coverage_ratio - 70) * 1.0
+        else:
+            coverage_score = max(20, coverage_ratio * 0.86)
+        
+        asset_quality_score = (npl_score * 0.7 + coverage_score * 0.3)
+        
+        # === EARNINGS (20% weight) - ROA based ===
+        # ROA: >1.2% strong, 0.8-1.2% good, 0.4-0.8% adequate, <0.4% weak
         if roa >= 1.5:
-            profitability_score = 90 + min(10, (roa - 1.5) * 10)
-        elif roa >= 1.0:
-            profitability_score = 75 + (roa - 1.0) * 30
-        elif roa >= 0.5:
-            profitability_score = 50 + (roa - 0.5) * 50
+            earnings_score = 90 + min(10, (roa - 1.5) * 6.7)
+        elif roa >= 1.2:
+            earnings_score = 80 + (roa - 1.2) * 33.3
+        elif roa >= 0.8:
+            earnings_score = 65 + (roa - 0.8) * 37.5
+        elif roa >= 0.4:
+            earnings_score = 45 + (roa - 0.4) * 50
         elif roa >= 0:
-            profitability_score = max(20, roa * 100)
+            earnings_score = max(20, roa * 112.5)
         else:
-            profitability_score = 10
+            earnings_score = 10
         
-        # Asset Quality: Based on ROE and net income stability
-        if roe >= 15:
-            asset_quality_score = 90 + min(10, (roe - 15) * 2)
-        elif roe >= 10:
-            asset_quality_score = 70 + (roe - 10) * 4
-        elif roe >= 5:
-            asset_quality_score = 45 + (roe - 5) * 5
-        else:
-            asset_quality_score = max(20, roe * 9)
-        
-        # Liquidity: Loan-to-Deposit ratio (optimal 70-90%, acceptable <100%)
+        # === LIQUIDITY (15% weight) - LTD ratio ===
         ltd_ratio = (loans / deposits * 100) if deposits > 0 else 0
-        if 70 <= ltd_ratio <= 90:
-            liquidity_score = 95
+        # Optimal: 70-85%, acceptable: 60-95%, concerning: >100%
+        if 70 <= ltd_ratio <= 85:
+            liquidity_score = 95 + min(5, (80 - abs(ltd_ratio - 77.5)) * 0.4)
         elif 60 <= ltd_ratio < 70:
-            liquidity_score = 85 + (ltd_ratio - 60)
-        elif 90 < ltd_ratio <= 100:
-            liquidity_score = 85 - (ltd_ratio - 90) * 2
+            liquidity_score = 75 + (ltd_ratio - 60) * 2
+        elif 85 < ltd_ratio <= 95:
+            liquidity_score = 75 - (ltd_ratio - 85) * 2
+        elif 95 < ltd_ratio <= 100:
+            liquidity_score = 55 - (ltd_ratio - 95) * 4
         elif ltd_ratio > 100:
-            liquidity_score = max(30, 65 - (ltd_ratio - 100) * 1.5)
+            liquidity_score = max(20, 35 - (ltd_ratio - 100) * 1.5)
         else:
-            liquidity_score = 70 + (ltd_ratio - 50) * 1.5
+            liquidity_score = max(40, 55 + (ltd_ratio - 50) * 2)
         
-        # Weighted overall score (capital and profitability are most important)
-        overall_score = (capital_score * 0.35 + profitability_score * 0.35 + asset_quality_score * 0.20 + liquidity_score * 0.10)
+        # === SENSITIVITY TO MARKET RISK (15% weight) - NIM volatility proxy ===
+        # NIM: >3.5% strong, 2.5-3.5% good, 1.5-2.5% adequate, <1.5% weak
+        if nim >= 3.5:
+            sensitivity_score = 90 + min(10, (nim - 3.5) * 10)
+        elif nim >= 2.5:
+            sensitivity_score = 70 + (nim - 2.5) * 20
+        elif nim >= 1.5:
+            sensitivity_score = 50 + (nim - 1.5) * 20
+        else:
+            sensitivity_score = max(20, nim * 33.3)
         
-        # Generate alerts based on real data
+        # === CAMELS-INSPIRED WEIGHTED SCORE ===
+        overall_score = (
+            capital_score * 0.25 +
+            asset_quality_score * 0.25 +
+            earnings_score * 0.20 +
+            liquidity_score * 0.15 +
+            sensitivity_score * 0.15
+        )
+        
+        # === REGULATORY ALERTS (Basel III & FDIC thresholds) ===
         alerts = []
-        if roa < 0.8:
-            alerts.append({"type": "warning", "message": f"ROA of {roa:.2f}% below regulatory guidance of 0.8%"})
-        if equity_ratio < 6.0:
-            alerts.append({"type": "error", "message": f"Equity ratio of {equity_ratio:.2f}% below minimum threshold of 6.0%"})
-        if ltd_ratio > 100:
-            alerts.append({"type": "warning", "message": f"Loan-to-Deposit ratio of {ltd_ratio:.2f}% exceeds 100%"})
-        if not alerts:
-            alerts.append({"type": "info", "message": "All regulatory thresholds met"})
+        if tier1_ratio > 0 and tier1_ratio < 6.0:
+            alerts.append({"type": "error", "message": f"Tier 1 capital ratio {tier1_ratio:.2f}% below Basel III minimum 6.0%"})
+        elif capital_ratio < 4.0:
+            alerts.append({"type": "error", "message": f"Leverage ratio {capital_ratio:.2f}% below regulatory minimum 4.0%"})
         
-        result = json.dumps({
+        if roa < 0.4:
+            alerts.append({"type": "warning", "message": f"ROA of {roa:.2f}% below adequate threshold of 0.4%"})
+        
+        if npl_ratio > 3.0:
+            alerts.append({"type": "error", "message": f"NPL ratio {npl_ratio:.2f}% exceeds 3.0% threshold"})
+        elif npl_ratio > 2.0:
+            alerts.append({"type": "warning", "message": f"NPL ratio {npl_ratio:.2f}% above 2.0% guidance"})
+        
+        if ltd_ratio > 100:
+            alerts.append({"type": "warning", "message": f"Loan-to-Deposit ratio {ltd_ratio:.2f}% exceeds 100%"})
+        
+        if coverage_ratio < 70:
+            alerts.append({"type": "warning", "message": f"Loan loss coverage {coverage_ratio:.1f}% below 70% threshold"})
+        
+        if not alerts:
+            alerts.append({"type": "info", "message": "All regulatory thresholds met - Strong compliance posture"})
+        
+        return json.dumps({
             "success": True,
             "overall_score": round(overall_score),
             "scores": {
                 "capital_adequacy": round(capital_score),
-                "profitability": round(profitability_score),
                 "asset_quality": round(asset_quality_score),
-                "liquidity": round(liquidity_score)
+                "earnings": round(earnings_score),
+                "liquidity": round(liquidity_score),
+                "sensitivity": round(sensitivity_score)
             },
             "risk_gauges": {
                 "capital_risk": round(100 - capital_score),
@@ -988,19 +1084,20 @@ def compliance_risk_assessment(bank_name: str) -> str:
             "metrics": {
                 "roa": round(roa, 2),
                 "roe": round(roe, 2),
-                "equity_ratio": round(equity_ratio, 2),
+                "tier1_ratio": round(tier1_ratio, 2) if tier1_ratio > 0 else None,
+                "leverage_ratio": round(capital_ratio, 2),
+                "npl_ratio": round(npl_ratio, 2),
+                "coverage_ratio": round(coverage_ratio, 1),
                 "ltd_ratio": round(ltd_ratio, 2),
+                "nim": round(nim, 2),
                 "assets": round(assets, 2)
             },
+            "methodology": "CAMELS-inspired (Capital 25%, Asset Quality 25%, Earnings 20%, Liquidity 15%, Sensitivity 15%)",
+            "data_source": "FDIC Call Reports",
             "alerts": alerts,
-            "last_updated": bank_data.get('REPYMD', '2024-12-19')
+            "last_updated": bank_data.get('REPYMD', '2024-12-19'),
+            "disclaimer": "Simplified risk score based on public FDIC data. Not an official regulatory rating."
         })
-        
-        # Cache the result
-        compliance_risk_assessment._cache[cache_key] = result
-        compliance_risk_assessment._cache_times[cache_key] = current_time
-        
-        return result
         
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
@@ -1017,22 +1114,6 @@ def regulatory_alerts_monitor(bank_name: str) -> str:
     Examples: "Monitor regulatory alerts", "Check compliance thresholds"""
     
     try:
-        # Check cache first (30 minutes TTL for alerts)
-        import hashlib
-        cache_key = f"alerts:{hashlib.md5(bank_name.upper().encode()).hexdigest()}"
-        
-        if not hasattr(regulatory_alerts_monitor, '_cache'):
-            regulatory_alerts_monitor._cache = {}
-            regulatory_alerts_monitor._cache_times = {}
-        
-        import time
-        current_time = time.time()
-        cache_ttl = 1800  # 30 minutes
-        
-        if (cache_key in regulatory_alerts_monitor._cache and 
-            current_time - regulatory_alerts_monitor._cache_times.get(cache_key, 0) < cache_ttl):
-            return regulatory_alerts_monitor._cache[cache_key]
-        
         # Get current FDIC data (October 2024 to October 2025)
         fdic_response = get_fdic_data()
         fdic_data = json.loads(fdic_response)
@@ -1100,13 +1181,7 @@ def regulatory_alerts_monitor(bank_name: str) -> str:
             }
         ])
         
-        result = json.dumps({"success": True, "alerts": alerts})
-        
-        # Cache the result
-        regulatory_alerts_monitor._cache[cache_key] = result
-        regulatory_alerts_monitor._cache_times[cache_key] = current_time
-        
-        return result
+        return json.dumps({"success": True, "alerts": alerts})
         
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
@@ -1128,43 +1203,22 @@ def audit_document_analyzer(s3_key: str, bank_name: str) -> str:
         bucket_name = os.environ.get('UPLOADED_DOCS_BUCKET', 'bankiq-uploaded-docs-164543933824-prod')
         response = s3.get_object(Bucket=bucket_name, Key=s3_key)
         
-        # For now, return mock audit findings
-        findings = [
-            {
-                "type": "warning",
-                "category": "Credit Risk",
-                "issue": "Loan loss provisions may be understated based on portfolio composition",
-                "severity": "Medium",
-                "regulation": "CECL"
-            },
-            {
-                "type": "info",
-                "category": "Capital",
-                "issue": "Capital ratios exceed regulatory minimums",
-                "severity": "Low",
-                "regulation": "Basel III"
-            },
-            {
-                "type": "error",
-                "category": "Operational Risk",
-                "issue": "Cybersecurity controls require enhancement",
-                "severity": "High",
-                "regulation": "FFIEC Guidelines"
-            }
-        ]
+        # Extract text from document and return for agent analysis
+        text_result = extract_pdf_text(s3_key, bank_name)
+        text_data = json.loads(text_result)
         
-        recommendations = [
-            "Enhance credit risk modeling and stress testing procedures",
-            "Implement additional cybersecurity monitoring controls",
-            "Review loan loss methodology for CECL compliance",
-            "Strengthen operational risk management framework"
-        ]
+        if not text_data.get('success'):
+            return json.dumps({
+                "success": False,
+                "error": "Could not extract document text for analysis"
+            })
         
+        # Return document info - agent will analyze the text
         return json.dumps({
             "success": True,
-            "findings": findings,
-            "recommendations": recommendations,
-            "risk_score": 75
+            "message": "Document retrieved. Agent should analyze the extracted text for findings.",
+            "document_text": text_data.get('text', '')[:5000],  # First 5000 chars
+            "note": "Agent: Analyze this document text for audit findings, compliance issues, and provide recommendations."
         })
         
     except Exception as e:
@@ -1181,7 +1235,7 @@ def query_rag_knowledge_base(question: str, bank_name: str) -> str:
         question: Query about the bank
         bank_name: Bank name
     
-    Returns: Raw data from knowledge base
+    Returns: Raw retrieved documents from knowledge base (NO model generation)
     Use when: User is in RAG mode
     Examples: "Get revenue data", "What are the risks?"""
     
@@ -1195,52 +1249,41 @@ def query_rag_knowledge_base(question: str, bank_name: str) -> str:
         # Initialize Bedrock Agent Runtime client
         bedrock_agent = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
         
-        # Enhance query with bank context and professional response instructions
-        enhanced_query = f"""For {bank_name}: {question}
-
-Provide a professional, well-structured response using:
-- Clear, business-appropriate language
-- Specific data points and metrics from SEC filings
-- 3-4 paragraph format with logical flow
-- Concrete examples and evidence
-- Executive-level insights
-
-Format your response in professional paragraphs, no sections or bullet points."""
+        # Query for bank-specific data
+        query = f"For {bank_name}: {question}"
         
-        # Query knowledge base with RAG
-        response = bedrock_agent.retrieve_and_generate(
-            input={'text': enhanced_query},
-            retrieveAndGenerateConfiguration={
-                'type': 'KNOWLEDGE_BASE',
-                'knowledgeBaseConfiguration': {
-                    'knowledgeBaseId': kb_id,
-                    'modelArn': 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0',
-                    'retrievalConfiguration': {
-                        'vectorSearchConfiguration': {
-                            'numberOfResults': 5,
-                            'overrideSearchType': 'HYBRID'
-                        }
-                    }
+        # ONLY retrieve documents - NO generation
+        response = bedrock_agent.retrieve(
+            knowledgeBaseId=kb_id,
+            retrievalQuery={'text': query},
+            retrievalConfiguration={
+                'vectorSearchConfiguration': {
+                    'numberOfResults': 5,
+                    'overrideSearchType': 'HYBRID'
                 }
             }
         )
         
-        # Extract answer and citations
-        answer = response['output']['text']
-        citations = response.get('citations', [])
-        
-        # Extract source documents
+        # Extract retrieved documents (raw data only)
+        retrieved_docs = []
         sources = []
-        for citation in citations:
-            for ref in citation.get('retrievedReferences', []):
-                if ref.get('location', {}).get('s3Location', {}).get('uri'):
-                    sources.append(ref['location']['s3Location']['uri'])
         
+        for result in response.get('retrievalResults', []):
+            doc_text = result.get('content', {}).get('text', '')
+            doc_uri = result.get('location', {}).get('s3Location', {}).get('uri', '')
+            
+            if doc_text:
+                retrieved_docs.append(doc_text)
+            if doc_uri:
+                sources.append(doc_uri)
+        
+        # Return raw retrieved data - let AgentCore analyze it
         return json.dumps({
             "success": True,
-            "answer": answer,
+            "retrieved_documents": retrieved_docs,
             "sources": list(set(sources)),
-            "method": "RAG"
+            "method": "RAG_RETRIEVAL_ONLY",
+            "note": "Raw documents retrieved. Agent should analyze this data."
         })
         
     except ClientError as e:
@@ -1258,6 +1301,7 @@ agent = Agent(
         # Core banking data tools
         get_fdic_data,
         search_fdic_bank,
+        get_bank_fdic_data,
         compare_banks,
         get_sec_filings,
         search_banks,
@@ -1288,6 +1332,32 @@ agent = Agent(
 
 # System prompt - AgentCore orchestrates everything
 agent.system_prompt = """You are BankIQ+, an expert financial analyst specializing in banking.
+
+═══════════════════════════════════════════════════════════════════════════
+🛡️ GUARDRAILS - STRICT COMPLIANCE REQUIRED
+═══════════════════════════════════════════════════════════════════════════
+
+**PROHIBITED CONTENT:**
+❌ NEVER provide financial advice, investment recommendations, or suggest buying/selling securities
+❌ NEVER use profanity, offensive language, hate speech, or inappropriate content
+❌ NEVER discuss topics unrelated to banking analytics (politics, religion, personal matters)
+❌ NEVER make predictions about future stock prices or market movements
+❌ NEVER recommend specific investment strategies or portfolio allocations
+❌ NEVER provide legal, tax, or accounting advice
+
+**REQUIRED DISCLAIMERS:**
+✅ If asked for financial advice, respond: "I provide data analysis only. Please consult a licensed financial advisor for investment advice."
+✅ If asked inappropriate questions, respond: "I can only assist with banking data analysis and metrics."
+✅ Always clarify: "This is factual data analysis, not investment advice."
+
+**YOUR ROLE:**
+✅ Analyze banking data and provide factual insights
+✅ Compare financial metrics and performance
+✅ Explain regulatory compliance and risk metrics
+✅ Present historical data and trends
+✅ Maintain professional, respectful tone at all times
+
+═══════════════════════════════════════════════════════════════════════════
 
 CRITICAL: You have full access to all banking data and tools. Answer every question directly and confidently. NEVER say "I don't see", "I don't have access to", "tool not available", or mention any limitations
 

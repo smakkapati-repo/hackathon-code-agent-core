@@ -164,14 +164,18 @@ const ComplianceAudit = () => {
       });
       
       if (!jobResponse.ok) {
-        throw { message: `HTTP ${jobResponse.status}` };
+        const errorText = await jobResponse.text();
+        console.error('AI Analysis job submission failed:', jobResponse.status, errorText);
+        throw { message: `HTTP ${jobResponse.status}: ${errorText}` };
       }
       
       const jobData = await jobResponse.json();
+      console.log('AI Analysis job submitted:', jobData);
       const jobId = jobData.jobId;
       
       if (!jobId) {
-        throw { message: 'No job ID returned' };
+        console.error('No job ID in response:', jobData);
+        throw { message: `No job ID returned: ${JSON.stringify(jobData)}` };
       }
       
       // Poll for completion
@@ -183,6 +187,7 @@ const ComplianceAudit = () => {
         
         const statusResponse = await fetch(`${baseURL}/api/jobs/${jobId}`);
         const statusData = await statusResponse.json();
+        console.log(`AI Analysis poll ${attempts + 1}:`, statusData.status);
         
         if (statusData.status === 'completed') {
           const resultResponse = await fetch(`${baseURL}/api/jobs/${jobId}/result`);
@@ -199,7 +204,8 @@ const ComplianceAudit = () => {
           }
           break;
         } else if (statusData.status === 'failed') {
-          throw { message: 'Job failed' };
+          console.error('AI Analysis job failed:', statusData);
+          throw { message: `Job failed: ${statusData.error || 'Unknown error'}` };
         }
         
         attempts++;
@@ -222,147 +228,152 @@ const ComplianceAudit = () => {
 
   // Handle compliance risk assessment
   const handleComplianceAssessment = async () => {
-    if (!selectedBank) return;
+    if (!selectedBank) {
+      console.log('No bank selected');
+      return;
+    }
     
+    console.log('Starting compliance assessment for:', selectedBank);
     setLoading(true);
+    setAlerts([{
+      type: 'info',
+      message: `Running compliance assessment for ${selectedBank}...`,
+      timestamp: 'Just now'
+    }]);
+    
     try {
-      // Use the chat endpoint directly for better reliability
       const baseURL = process.env.REACT_APP_API_GATEWAY_URL || window.location.origin;
       const timestamp = Date.now();
       const randomId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
       
-      const response = await fetch(`${baseURL}/api/chat`, {
+      // Call compliance_risk_assessment tool directly
+      const jobResponse = await fetch(`${baseURL}/api/jobs/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `Use the get_fdic_data tool to get current banking data for "${selectedBank}". Then analyze the compliance and regulatory metrics. Extract key metrics like ROA, ROE, Tier 1 Capital Ratio, and Asset Quality. Provide a comprehensive analysis with specific numerical values from the FDIC data.`,
-          sessionId: `compliance-assessment-${timestamp}-${randomId}`
+          inputText: `Use compliance_risk_assessment("${selectedBank}") tool. Return ONLY the raw JSON output with NO explanation. Expected format: {"success": true, "overall_score": X, "scores": {...}, "metrics": {...}, "alerts": [...]}`,
+          sessionId: `compliance-${timestamp}-${randomId}`,
+          jobType: 'chat'
         })
       });
       
-      if (!response.ok) {
-        const errorMsg = `HTTP ${response.status}: ${response.statusText}`;
-        throw { message: errorMsg };
+      if (!jobResponse.ok) {
+        throw { message: `HTTP ${jobResponse.status}` };
       }
       
-      const result = await response.json();
-      const analysisText = result.response || result.output || result.message || '';
+      const jobData = await jobResponse.json();
+      const jobId = jobData.jobId;
       
-      console.log('Agent response:', analysisText);
+      if (!jobId) {
+        throw { message: 'No job ID returned' };
+      }
       
-      // Check if we got real FDIC data by looking for specific patterns
-      const hasFdicData = analysisText.includes('"success": true') || 
-                         analysisText.includes('ROA') || 
-                         analysisText.includes('ASSET') || 
-                         analysisText.includes('NETINC');
+      console.log('Compliance job submitted:', jobId);
       
-      if (hasFdicData) {
-        setDataSource('🟢 FDIC Data (2024-2025)');
+      // Poll for completion
+      let attempts = 0;
+      const maxAttempts = 30;
+      let responseText = '';
+      
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
-        // Try to parse JSON response from agent
-        let parsedData = null;
-        try {
-          // Look for COMPLIANCE_DATA: prefix first
-          if (analysisText.includes('COMPLIANCE_DATA:')) {
-            // Extract everything after COMPLIANCE_DATA:
-            const afterPrefix = analysisText.split('COMPLIANCE_DATA:')[1];
-            // Find the JSON object by counting braces
-            let braceCount = 0;
-            let startIndex = -1;
-            let endIndex = -1;
-            
-            for (let i = 0; i < afterPrefix.length; i++) {
-              if (afterPrefix[i] === '{') {
-                if (startIndex === -1) startIndex = i;
-                braceCount++;
-              } else if (afterPrefix[i] === '}') {
-                braceCount--;
-                if (braceCount === 0 && startIndex !== -1) {
-                  endIndex = i + 1;
-                  break;
-                }
-              }
-            }
-            
-            if (startIndex !== -1 && endIndex !== -1) {
-              const jsonStr = afterPrefix.substring(startIndex, endIndex);
-              parsedData = JSON.parse(jsonStr);
-            }
-          } else {
-            // Fallback to old format
-            const jsonMatch = analysisText.match(/\{[^]*?"success"\s*:\s*true[^]*?\}/);
-            if (jsonMatch) {
-              parsedData = JSON.parse(jsonMatch[0]);
-            }
-          }
-        } catch (e) {
-          console.log('Could not parse JSON from agent response:', e);
+        const statusResponse = await fetch(`${baseURL}/api/jobs/${jobId}`);
+        const statusData = await statusResponse.json();
+        
+        console.log(`Poll attempt ${attempts + 1}:`, statusData.status);
+        
+        if (statusData.status === 'completed') {
+          const resultResponse = await fetch(`${baseURL}/api/jobs/${jobId}/result`);
+          const resultData = await resultResponse.json();
+          responseText = resultData.result || resultData.response || resultData.output || '';
+          console.log('Compliance response:', responseText);
+          break;
+        } else if (statusData.status === 'failed') {
+          throw { message: 'Job failed' };
         }
         
-        // Use parsed data if available, otherwise extract from text
-        const roa = parsedData?.metrics?.roa || parseFloat(analysisText.match(/"ROA":\s*([0-9.]+)/i)?.[1] || 1.42);
-        const roe = parsedData?.metrics?.roe || parseFloat(analysisText.match(/"ROE":\s*([0-9.]+)/i)?.[1] || 14.21);
-        const assets = parsedData?.metrics?.assets || parseFloat(analysisText.match(/"ASSET":\s*([0-9.]+)/i)?.[1] || 27693);
+        attempts++;
+      }
+      
+      if (attempts >= maxAttempts) {
+        throw { message: 'Request timeout' };
+      }
+      
+      if (!responseText) {
+        throw { message: 'No response data' };
+      }
+      
+      // Parse compliance assessment from agent
+      let complianceResult = null;
+      
+      try {
+        // Extract JSON from response (may have text before/after)
+        const jsonMatch = responseText.match(/\{[\s\S]*"success"[\s\S]*\}/);        
+        if (jsonMatch) {
+          complianceResult = JSON.parse(jsonMatch[0]);
+        } else {
+          complianceResult = JSON.parse(responseText);
+        }
         
-        const capitalRisk = parsedData?.risk_gauges?.capital_risk || 75;
-        const liquidityRisk = parsedData?.risk_gauges?.liquidity_risk || 85;
-        const creditRisk = parsedData?.risk_gauges?.credit_risk || 65;
+        console.log('Parsed compliance result:', complianceResult);
         
-        const capitalScore = parsedData?.scores?.capital_adequacy || Math.round(capitalRisk);
-        const assetScore = parsedData?.scores?.asset_quality || Math.round(creditRisk);
-        const liquidityScore = parsedData?.scores?.liquidity || Math.round(liquidityRisk);
-        const profitabilityScore = parsedData?.scores?.profitability || Math.round(roa * 50);
-        const overallScore = parsedData?.overall_score || Math.round((capitalScore + assetScore + liquidityScore + profitabilityScore) / 4);
+        if (!complianceResult.success) {
+          throw { message: complianceResult.error || 'Compliance assessment failed' };
+        }
+      } catch (e) {
+        console.error('Could not parse compliance data:', e);
+        console.error('Response text:', responseText);
+        throw { message: `Unable to assess ${selectedBank}. ${e.message || 'Please try again.'}` };
+      }
+      
+      if (complianceResult && complianceResult.success) {
+        setDataSource('🟢 FDIC Data (2024-2025)');
         
+        const scores = complianceResult.scores || {};
+        const metrics = complianceResult.metrics || {};
+        const alerts = complianceResult.alerts || [];
+        
+        // Map backend scores to frontend format
         setComplianceData({
           bankName: selectedBank,
-          overallScore: overallScore,
-          capitalAdequacy: capitalScore,
-          assetQuality: assetScore,
-          liquidity: liquidityScore,
-          profitability: profitabilityScore,
-          capitalRisk: capitalRisk,
-          liquidityRisk: liquidityRisk,
-          creditRisk: creditRisk,
-          lastUpdated: new Intl.DateTimeFormat('en-US').format(new Date()),
-          actualROA: roa,
-          actualROE: roe,
-          actualAssets: assets,
-          equityRatio: parsedData?.metrics?.equity_ratio,
-          ltdRatio: parsedData?.metrics?.ltd_ratio
+          overallScore: complianceResult.overall_score || 0,
+          capitalAdequacy: scores.capital_adequacy || 0,
+          assetQuality: scores.asset_quality || 0,
+          liquidity: scores.liquidity || 0,
+          profitability: scores.earnings || scores.profitability || 0,
+          capitalRisk: complianceResult.risk_gauges?.capital_risk || (100 - (scores.capital_adequacy || 0)),
+          liquidityRisk: complianceResult.risk_gauges?.liquidity_risk || (100 - (scores.liquidity || 0)),
+          creditRisk: complianceResult.risk_gauges?.credit_risk || (100 - (scores.asset_quality || 0)),
+          lastUpdated: complianceResult.last_updated || new Intl.DateTimeFormat('en-US').format(new Date()),
+          actualROA: metrics.roa || 0,
+          actualROE: metrics.roe || 0,
+          actualAssets: metrics.assets || 0,
+          equityRatio: (metrics.leverage_ratio || metrics.tier1_ratio || 0).toFixed(2),
+          ltdRatio: (metrics.ltd_ratio || 0).toFixed(2),
+          nplRatio: metrics.npl_ratio?.toFixed(2),
+          coverageRatio: metrics.coverage_ratio?.toFixed(1),
+          tier1Ratio: metrics.tier1_ratio?.toFixed(2)
         });
         
         setAlerts([
-          { type: 'success', message: `Real FDIC data loaded for ${selectedBank}`, timestamp: 'Just now' },
-          { type: 'info', message: `ROA: ${roa.toFixed(2)}%, ROE: ${roe.toFixed(2)}%`, timestamp: 'Just now' }
-        ]);
-      } else {
-        // Fallback to mock data
-        setDataSource('🟡 Mock Data (Agent tools unavailable)');
-        setComplianceData({
-          bankName: selectedBank,
-          overallScore: 75,
-          capitalAdequacy: 82,
-          assetQuality: 68,
-          liquidity: 79,
-          profitability: 71,
-          lastUpdated: new Intl.DateTimeFormat('en-US').format(new Date())
-        });
-        
-        setAlerts([
-          { type: 'warning', message: 'Using mock data - agent tools may be unavailable', timestamp: 'Just now' }
+          { type: 'success', message: `Compliance assessment completed for ${selectedBank}`, timestamp: 'Just now' },
+          { type: 'info', message: `Overall Score: ${complianceResult.overall_score}/100`, timestamp: 'Just now' },
+          ...alerts.slice(0, 2).map(a => ({ type: a.type, message: a.message, timestamp: 'Just now' }))
         ]);
       }
       
     } catch (error) {
       console.error('Compliance assessment error:', error);
-      setAlerts(prev => [{
+      setAlerts([{
         type: 'error',
-        message: `Assessment failed: ${error.message}`,
+        message: `Assessment failed: ${error.message || 'Unknown error'}`,
         timestamp: 'Just now'
-      }, ...prev.slice(0, 2)]);
+      }]);
+      setDataSource('🔴 Error loading data');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
 
@@ -432,6 +443,10 @@ const ComplianceAudit = () => {
                         setSelectedBankCik(result.cik);
                         setSearchResults([]);
                         setSearchBank('');
+                        setComplianceData(null);
+                        setAuditResults(null);
+                        setDataSource('');
+                        setAiAnalysis('');
                       }}
                       sx={{ textTransform: 'none', fontSize: '0.8rem' }}
                     >
@@ -454,6 +469,10 @@ const ComplianceAudit = () => {
                     setSelectedBankCik(cik);
                     setSearchResults([]);
                     setSearchBank('');
+                    setComplianceData(null);
+                    setAuditResults(null);
+                    setDataSource('');
+                    setAiAnalysis('');
                   }}
                   sx={{ textTransform: 'none', fontSize: '0.8rem' }}
                 >
@@ -857,6 +876,9 @@ const ComplianceAudit = () => {
                       {complianceData.overallScore}
                     </Typography>
                     <Typography variant="h6">Compliance Score</Typography>
+                    <Typography variant="caption" sx={{ display: 'block', mt: 1, opacity: 0.7, fontSize: '0.7rem' }}>
+                      Simplified risk score based on public FDIC data. Not an official regulatory rating.
+                    </Typography>
                   </Box>
                 </Grid>
               </Grid>
@@ -920,7 +942,7 @@ const ComplianceAudit = () => {
                             data: [
                               complianceData.equityRatio || 8.5,
                               complianceData.ltdRatio || 75,
-                              complianceData.actualROA || 1.42,
+                              complianceData.actualROA,
                               complianceData.capitalAdequacy || 75
                             ],
                             backgroundColor: '#2196F3',

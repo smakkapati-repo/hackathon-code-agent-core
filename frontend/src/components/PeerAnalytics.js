@@ -216,9 +216,11 @@ function PeerAnalytics() {
         }
       }
 
-      // If still no data, generate mock data
+      // If still no data, show error
       if (chartDataFromResponse.length === 0) {
-        chartDataFromResponse = generateMockData(apiBaseBank, apiPeerBanks, selectedMetric);
+        setError('No data received from agent. Please try again or check if the banks exist in FDIC database.');
+        setLoading(false);
+        return;
       }
 
       setAnalysis(analysisText);
@@ -234,24 +236,7 @@ function PeerAnalytics() {
     }
   };
 
-  const generateMockData = (baseBank, peerBanks, metric) => {
-    const quarters = ['2024-Q1', '2024-Q2', '2024-Q3', '2024-Q4', '2025-Q1'];
-    const banks = [baseBank, ...peerBanks];
-    const data = [];
 
-    banks.forEach(bank => {
-      quarters.forEach(quarter => {
-        data.push({
-          Bank: bank,
-          Quarter: quarter,
-          Metric: metric.replace('[Q] ', '').replace('[M] ', ''),
-          Value: Math.random() * 20 + 5 // Random value between 5-25
-        });
-      });
-    });
-
-    return data;
-  };
 
   const processChartData = (data) => {
     if (!data || data.length === 0) return [];
@@ -278,26 +263,7 @@ function PeerAnalytics() {
     (analysisType === 'Quarterly Metrics' ? uploadedMetrics.map(m => `[Q] ${m}`) : uploadedMetrics.map(m => `[M] ${m}`)) :
     metrics;
 
-  // Sample data for 2023-2025 period
-  const sampleData = [
-    { quarter: '2023-Q1', JPMorgan: 1.25, BofA: 1.18, Wells: 1.12, Citi: 1.08 },
-    { quarter: '2023-Q2', JPMorgan: 1.28, BofA: 1.22, Wells: 1.15, Citi: 1.12 },
-    { quarter: '2023-Q3', JPMorgan: 1.32, BofA: 1.25, Wells: 1.18, Citi: 1.15 },
-    { quarter: '2023-Q4', JPMorgan: 1.35, BofA: 1.28, Wells: 1.21, Citi: 1.18 },
-    { quarter: '2024-Q1', JPMorgan: 1.38, BofA: 1.31, Wells: 1.24, Citi: 1.21 },
-    { quarter: '2024-Q2', JPMorgan: 1.41, BofA: 1.34, Wells: 1.27, Citi: 1.24 },
-    { quarter: '2024-Q3', JPMorgan: 1.44, BofA: 1.37, Wells: 1.30, Citi: 1.27 },
-    { quarter: '2024-Q4', JPMorgan: 1.47, BofA: 1.40, Wells: 1.33, Citi: 1.30 },
-    { quarter: '2025-Q1', JPMorgan: 1.50, BofA: 1.43, Wells: 1.36, Citi: 1.33 },
-    { quarter: '2025-Q2', JPMorgan: 1.53, BofA: 1.46, Wells: 1.39, Citi: 1.36 }
-  ];
-
-  const tableData = [
-    { bank: 'JPMorgan Chase', roa: 1.38, roe: 15.2, nim: 2.8, tier1: 12.5 },
-    { bank: 'Bank of America', roa: 1.31, roe: 14.8, nim: 2.6, tier1: 11.8 },
-    { bank: 'Wells Fargo', roa: 1.24, roe: 13.9, nim: 2.9, tier1: 12.1 },
-    { bank: 'Citigroup', roa: 1.21, roe: 13.2, nim: 2.7, tier1: 11.9 }
-  ];
+  // Removed sample/mock data - all data must come from real sources
 
   return (
     <Box>
@@ -308,7 +274,7 @@ function PeerAnalytics() {
           </Typography>
           {dataSource && (
             <Typography variant="caption" sx={{ color: 'text.secondary', mt: 0.5, display: 'block' }}>
-              Data Source: {dataSource.includes('FDIC Call Reports') ? '🟢 FDIC Call Reports (2023-2025)' : '🟡 Mock Data'}
+              Data Source: {dataSource.includes('FDIC Call Reports') ? '🟢 FDIC Call Reports (2023-2025)' : dataSource || 'No Data'}
             </Typography>
           )}
         </Box>

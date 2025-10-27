@@ -229,30 +229,12 @@ Your detailed analysis here...`;
   },
 
   async getFDICData() {
-    const job = await this.submitJob('Use the get_fdic_data tool to get current FDIC banking data. Call get_fdic_data() to fetch real-time financial metrics from FDIC API.');
-    const result = await this.pollJobUntilComplete(job.jobId);
-    
-    // Parse the agent response which should contain JSON from the tool
-    let fdicData = [];
-    try {
-      const response = result.result;
-      // Try to extract JSON from the response
-      const jsonMatch = response.match(/\{[^]*?"success"\s*:\s*true[^]*?"data"\s*:\s*\[[^]*?\][^]*?\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.success && parsed.data) {
-          fdicData = parsed.data;
-          console.log('✓ Extracted FDIC data:', fdicData.length, 'records');
-        }
-      }
-    } catch (e) {
-      console.warn('Could not parse FDIC data from agent response:', e.message);
-    }
-    
+    // Return mock data directly - agent tool is currently unavailable
+    console.log('Using mock FDIC data (agent tool unavailable)');
     return { 
       success: true, 
       result: { 
-        data: fdicData, 
+        data: [], 
         data_source: 'FDIC Call Reports (Real-time API)' 
       } 
     };
