@@ -6,7 +6,7 @@ from diagrams.aws.storage import S3
 from diagrams.aws.ml import Bedrock
 from diagrams.aws.analytics import AmazonOpensearchService
 from diagrams.aws.management import Cloudwatch
-from diagrams.aws.security import IAM, Cognito
+from diagrams.aws.security import IAM, Cognito, Shield
 from diagrams.aws.general import User
 from diagrams.onprem.client import Users as ExternalUsers
 from diagrams.onprem.compute import Server
@@ -81,9 +81,12 @@ with Diagram(
         
         # AgentCore Runtime
         with Cluster("Bedrock AgentCore + RAG", graph_attr={"bgcolor": "white", "style": "rounded"}):
+            guardrails = Shield("Bedrock Guardrails\nContent Filtering\nTopic Blocking\nPII Protection")
             agentcore = Bedrock("AgentCore Runtime\nbank_iq_agent\n24 Tools + Memory\nCompliance Analysis")
             claude = Bedrock("Claude Sonnet 4.5\nConversational AI")
             opensearch = AmazonOpensearchService("OpenSearch Serverless\nVector Store\nRAG Knowledge Base")
+            
+            guardrails >> agentcore
             
         # CI/CD Pipeline
         with Cluster("CI/CD Pipeline", graph_attr={"bgcolor": "white", "style": "rounded"}):
@@ -117,8 +120,11 @@ with Diagram(
     # Step 5: Backend to AgentCore
     ecs_backend >> Edge(label="5. Invoke Agent", color="#FF5722", style="bold") >> agentcore
     
+    # Step 6: Backend to Guardrails
+    ecs_backend >> Edge(label="6a. Content Check", color="#FF5722", style="dashed") >> guardrails
+    
     # Step 7: AgentCore to Claude
-    agentcore >> Edge(label="6. AI Analysis\nBank Performance\nCompliance Scoring", color="#E91E63") >> claude
+    agentcore >> Edge(label="6b. AI Analysis\nBank Performance\nCompliance Scoring", color="#E91E63") >> claude
     
     # Step 7b: AgentCore to OpenSearch (RAG)
     agentcore >> Edge(label="RAG Query\nVector Search", color="#E91E63", style="dashed") >> opensearch
