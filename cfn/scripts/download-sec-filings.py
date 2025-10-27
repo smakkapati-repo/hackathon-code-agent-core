@@ -148,11 +148,24 @@ Accession: {accession}
         print(f"      Error: {e}")
         return None
 
+def get_region():
+    """Get AWS region from environment or default"""
+    region = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION')
+    if not region:
+        try:
+            session = boto3.session.Session()
+            region = session.region_name
+        except:
+            region = 'us-east-1'
+    return region
+
 def get_s3_client():
-    return boto3.client('s3')
+    region = get_region()
+    return boto3.client('s3', region_name=region)
 
 def get_bucket_name():
-    cfn = boto3.client('cloudformation')
+    region = get_region()
+    cfn = boto3.client('cloudformation', region_name=region)
     try:
         response = cfn.describe_stacks(StackName='bankiq-infra')
         outputs = response['Stacks'][0]['Outputs']
@@ -160,7 +173,8 @@ def get_bucket_name():
             if output['OutputKey'] == 'SECFilingsBucketName':
                 return output['OutputValue']
     except:
-        account_id = boto3.client('sts').get_caller_identity()['Account']
+        region = get_region()
+        account_id = boto3.client('sts', region_name=region).get_caller_identity()['Account']
         return f"bankiq-sec-filings-{account_id}-prod"
 
 def download_bank_filings(bank_name, cik, bucket_name):
