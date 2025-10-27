@@ -371,13 +371,39 @@ fi
 if [[ "$INFRA_STACK_STATUS" != "NOT_FOUND" && "$INFRA_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
   echo "Deleting ${STACK_NAME}-infra stack (base infrastructure - LAST, status: $INFRA_STACK_STATUS)..."
   
-  # If stack is in DELETE_FAILED state, manually delete the SEC filings bucket first
+  # Get VPC ID for ENI cleanup
+  VPC_ID=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-infra --region $REGION --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text 2>/dev/null || echo "")
+  
+  # If stack is in DELETE_FAILED state, clean up network resources
   if [[ "$INFRA_STACK_STATUS" == "DELETE_FAILED" ]]; then
     echo "⚠️  Stack is in DELETE_FAILED state, cleaning up failed resources..."
+    
+    # Clean up SEC filings bucket
     SEC_BUCKET=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-infra --region $REGION --query 'Stacks[0].Outputs[?OutputKey==`SECFilingsBucketName`].OutputValue' --output text 2>/dev/null || echo "")
     if [ -n "$SEC_BUCKET" ]; then
       echo "Manually deleting SEC filings bucket: $SEC_BUCKET"
       delete_bucket_with_versions $SEC_BUCKET 2>/dev/null || true
+    fi
+    
+    # Clean up ENIs in VPC
+    if [ -n "$VPC_ID" ]; then
+      echo "Cleaning up network interfaces in VPC: $VPC_ID"
+      ENI_IDS=$(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[].NetworkInterfaceId' --output text --region $REGION 2>/dev/null || echo "")
+      if [ -n "$ENI_IDS" ]; then
+        for ENI_ID in $ENI_IDS; do
+          echo "  Detaching and deleting ENI: $ENI_ID"
+          # Detach if attached
+          ATTACHMENT_ID=$(aws ec2 describe-network-interfaces --network-interface-ids $ENI_ID --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text --region $REGION 2>/dev/null || echo "")
+          if [ -n "$ATTACHMENT_ID" ] && [ "$ATTACHMENT_ID" != "None" ]; then
+            aws ec2 detach-network-interface --attachment-id $ATTACHMENT_ID --region $REGION --force 2>/dev/null || true
+            sleep 2
+          fi
+          # Delete ENI
+          aws ec2 delete-network-interface --network-interface-id $ENI_ID --region $REGION 2>/dev/null || true
+        done
+        echo "  Waiting 10 seconds for ENIs to detach..."
+        sleep 10
+      fi
     fi
   fi
   
@@ -394,13 +420,30 @@ if [[ "$INFRA_STACK_STATUS" != "NOT_FOUND" && "$INFRA_STACK_STATUS" != "DELETE_C
   echo -e "${YELLOW}⏳ Waiting for infra stack deletion (may take 5-10 minutes)...${NC}"
   aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Infra stack deletion completed with warnings"
   
-  # Retry if still in DELETE_FAILED state
-  RETRY_STATUS=$(get_stack_status ${STACK_NAME}-infra)
-  if [[ "$RETRY_STATUS" == "DELETE_FAILED" ]]; then
-    echo "⚠️  Stack still in DELETE_FAILED, retrying deletion..."
-    aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION
-    aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Retry completed"
-  fi
+  # Retry up to 3 times if still in DELETE_FAILED state
+  for RETRY in 1 2 3; do
+    RETRY_STATUS=$(get_stack_status ${STACK_NAME}-infra)
+    if [[ "$RETRY_STATUS" == "DELETE_FAILED" ]]; then
+      echo "⚠️  Stack still in DELETE_FAILED (attempt $RETRY/3), cleaning up ENIs and retrying..."
+      
+      # Clean up ENIs again
+      if [ -n "$VPC_ID" ]; then
+        ENI_IDS=$(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[].NetworkInterfaceId' --output text --region $REGION 2>/dev/null || echo "")
+        if [ -n "$ENI_IDS" ]; then
+          for ENI_ID in $ENI_IDS; do
+            aws ec2 delete-network-interface --network-interface-id $ENI_ID --region $REGION 2>/dev/null || true
+          done
+          sleep 5
+        fi
+      fi
+      
+      # Retry deletion
+      aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION
+      aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Retry $RETRY completed"
+    else
+      break
+    fi
+  done
   
   echo -e "${GREEN}✅ Infra stack deleted${NC}"
   echo ""
