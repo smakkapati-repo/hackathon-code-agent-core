@@ -139,7 +139,7 @@ if agentcore status 2>/dev/null | grep -q "Agent ARN:"; then
         echo "Launching endpoint..."
         TEMP_LOG="${SCRIPT_DIR}/temp/agent_deploy.log"
         mkdir -p "${SCRIPT_DIR}/temp"
-        PYTHONIOENCODING=utf-8 agentcore launch -a bank_iq_agent --auto-update-on-conflict 2>&1 | tee "$TEMP_LOG"
+        echo "" | PYTHONIOENCODING=utf-8 agentcore launch -a bank_iq_agent --auto-update-on-conflict --yes 2>&1 | tee "$TEMP_LOG"
         
         # Get new ARN after launch
         sleep 10
@@ -151,7 +151,7 @@ else
     echo "Deploying new agent..."
     TEMP_LOG="${SCRIPT_DIR}/temp/agent_deploy.log"
     mkdir -p "${SCRIPT_DIR}/temp"
-    PYTHONIOENCODING=utf-8 agentcore launch -a bank_iq_agent --auto-update-on-conflict 2>&1 | tee "$TEMP_LOG"
+    echo "" | PYTHONIOENCODING=utf-8 agentcore launch -a bank_iq_agent --auto-update-on-conflict --yes 2>&1 | tee "$TEMP_LOG"
     
     # Wait for deployment to complete and config to update
     sleep 10
