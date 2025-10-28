@@ -40,6 +40,9 @@ EXPOSE 8000
 # Copy entire project (respecting .dockerignore)
 COPY . .
 
+# Copy Python download script from parent directory
+COPY ../cfn/scripts/download-single-bank.py /app/scripts/
+
 # Use the full module path
 
 CMD ["opentelemetry-instrument", "python", "-m", "bank_iq_agent"]
