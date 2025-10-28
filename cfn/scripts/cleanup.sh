@@ -125,7 +125,34 @@ if [ -n "$AGENT_ECR" ]; then
   echo "✅ Agent ECR repository deleted"
 fi
 
-# Step 2.5: Delete OpenSearch Serverless collection (MUST BE BEFORE STACK DELETION)
+# Step 2.5: Delete RAG Knowledge Base (BEFORE OpenSearch)
+echo -e "${YELLOW}🗑️  Deleting RAG Knowledge Base...${NC}"
+if command -v aws &> /dev/null; then
+  # List and delete knowledge bases
+  KB_IDS=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?contains(name, 'bankiq')].knowledgeBaseId" --output text 2>/dev/null || echo "")
+  if [ -n "$KB_IDS" ]; then
+    for KB_ID in $KB_IDS; do
+      echo "Deleting Knowledge Base: $KB_ID"
+      # Delete data sources first
+      DS_IDS=$(aws bedrock-agent list-data-sources --knowledge-base-id $KB_ID --region $REGION --query "dataSourceSummaries[].dataSourceId" --output text 2>/dev/null || echo "")
+      for DS_ID in $DS_IDS; do
+        echo "  Deleting data source: $DS_ID"
+        aws bedrock-agent delete-data-source --knowledge-base-id $KB_ID --data-source-id $DS_ID --region $REGION 2>/dev/null || true
+      done
+      echo "  Waiting 10 seconds for data sources to delete..."
+      sleep 10
+      # Delete knowledge base
+      aws bedrock-agent delete-knowledge-base --knowledge-base-id $KB_ID --region $REGION 2>/dev/null || true
+    done
+    echo "⏳ Waiting 30 seconds for KB deletion to complete..."
+    sleep 30
+    echo "✅ RAG Knowledge Base deletion attempted"
+  else
+    echo "⚠️  No RAG Knowledge Bases found"
+  fi
+fi
+
+# Step 2.6: Delete OpenSearch Serverless collection (AFTER KB deletion)
 echo -e "${YELLOW}🗑️  Deleting OpenSearch Serverless collections...${NC}"
 COLLECTIONS=$(aws opensearchserverless list-collections --region $REGION --query "collectionSummaries[?contains(name, 'bankiq')].id" --output text 2>/dev/null || echo "")
 if [ -n "$COLLECTIONS" ]; then
@@ -138,28 +165,6 @@ if [ -n "$COLLECTIONS" ]; then
   echo "✅ OpenSearch collections deleted"
 else
   echo "⚠️  No OpenSearch collections found"
-fi
-
-# Step 2.6: Delete RAG Knowledge Base
-echo -e "${YELLOW}🗑️  Deleting RAG Knowledge Base...${NC}"
-if command -v aws &> /dev/null; then
-  # List and delete knowledge bases
-  KB_IDS=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?contains(name, 'bankiq')].knowledgeBaseId" --output text 2>/dev/null || echo "")
-  if [ -n "$KB_IDS" ]; then
-    for KB_ID in $KB_IDS; do
-      echo "Deleting Knowledge Base: $KB_ID"
-      # Delete data sources first
-      DS_IDS=$(aws bedrock-agent list-data-sources --knowledge-base-id $KB_ID --region $REGION --query "dataSourceSummaries[].dataSourceId" --output text 2>/dev/null || echo "")
-      for DS_ID in $DS_IDS; do
-        aws bedrock-agent delete-data-source --knowledge-base-id $KB_ID --data-source-id $DS_ID --region $REGION 2>/dev/null || true
-      done
-      # Delete knowledge base
-      aws bedrock-agent delete-knowledge-base --knowledge-base-id $KB_ID --region $REGION 2>/dev/null || true
-    done
-    echo "✅ RAG Knowledge Base deletion attempted"
-  else
-    echo "⚠️  No RAG Knowledge Bases found"
-  fi
 fi
 
 # Step 2.6: Delete AgentCore agent (but keep IAM roles for redeployment)
