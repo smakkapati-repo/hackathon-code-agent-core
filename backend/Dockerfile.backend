@@ -18,9 +18,8 @@ RUN npm ci --production --no-optional
 COPY *.js ./
 COPY *.py ./
 
-# Create cfn/scripts directory and copy Python download script
+# Create cfn/scripts directory (download script copied if exists)
 RUN mkdir -p ../cfn/scripts
-COPY download-single-bank.py ../cfn/scripts/
 
 # Expose port
 EXPOSE 3001
