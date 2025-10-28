@@ -429,7 +429,6 @@ if [[ "$INFRA_STACK_STATUS" != "NOT_FOUND" && "$INFRA_STACK_STATUS" != "DELETE_C
     aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Deletion completed"
     echo -e "${GREEN}✅ Infra stack deleted${NC}"
     echo ""
-  else
   fi
   
   # Get VPC ID for ENI cleanup
