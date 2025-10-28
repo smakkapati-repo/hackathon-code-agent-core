@@ -313,6 +313,8 @@ export AWS_DEFAULT_REGION=us-east-1  # or your preferred region
 ./cfn/scripts/deploy-all.sh
 ```
 
+**Note for Windows users:** During agent deployment, you may be prompted to press Enter. Simply press Enter to continue.
+
 **Note:** The deployment automatically:
 - Creates Cognito User Pool for authentication
 - Deploys infrastructure (VPC, ALB, ECS, S3, ECR)
