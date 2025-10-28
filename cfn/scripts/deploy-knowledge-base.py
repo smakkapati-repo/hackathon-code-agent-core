@@ -142,9 +142,11 @@ def create_knowledge_base():
     bedrock = boto3.client('bedrock-agent')
     outputs = get_stack_outputs()
     
-    # Get AWS account ID for unique KB name
+    # Get AWS account ID and timestamp for unique KB name
+    import time
     account_id = boto3.client('sts').get_caller_identity()['Account']
-    kb_name = f"bankiq-sec-filings-kb-{account_id}"
+    timestamp = int(time.time())
+    kb_name = f"bankiq-sec-filings-kb-{account_id}-{timestamp}"
     
     print(f"\n📚 Creating Knowledge Base: {kb_name}")
     
