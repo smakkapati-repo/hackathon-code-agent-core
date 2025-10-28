@@ -483,7 +483,13 @@ if [[ "$INFRA_STACK_STATUS" != "NOT_FOUND" && "$INFRA_STACK_STATUS" != "DELETE_C
   fi
   
   echo -e "${YELLOW}⏳ Waiting for infra stack deletion (may take 5-10 minutes)...${NC}"
-  aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Infra stack deletion completed with warnings"
+  # Check if stack still exists before waiting
+  CURRENT_STATUS=$(get_stack_status ${STACK_NAME}-infra)
+  if [[ "$CURRENT_STATUS" != "NOT_FOUND" && "$CURRENT_STATUS" != "DELETE_COMPLETE" ]]; then
+    aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Infra stack deletion completed with warnings"
+  else
+    echo "✅ Stack already deleted"
+  fi
   
   # Retry up to 3 times if still in DELETE_FAILED state
   for RETRY in 1 2 3; do
