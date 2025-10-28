@@ -139,8 +139,8 @@ if command -v aws &> /dev/null; then
         echo "  Deleting data source: $DS_ID"
         aws bedrock-agent delete-data-source --knowledge-base-id $KB_ID --data-source-id $DS_ID --region $REGION 2>/dev/null || true
       done
-      echo "  Waiting 10 seconds for data sources to delete..."
-      sleep 10
+      echo "  Waiting 30 seconds for data sources to delete..."
+      sleep 30
       # Delete knowledge base
       aws bedrock-agent delete-knowledge-base --knowledge-base-id $KB_ID --region $REGION 2>/dev/null || true
     done
