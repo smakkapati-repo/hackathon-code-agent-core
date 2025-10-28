@@ -240,29 +240,57 @@ fi
 echo ""
 echo -e "${YELLOW}🗑️  Emptying S3 buckets...${NC}"
 
-# Function to empty S3 bucket
+# Function to empty S3 bucket completely
 empty_bucket() {
   local BUCKET=$1
   echo "Emptying bucket: $BUCKET"
   
-  # Delete all current objects
+  # Check if bucket exists
+  if ! aws s3api head-bucket --bucket $BUCKET --region $REGION 2>/dev/null; then
+    echo "  Bucket does not exist, skipping"
+    return
+  fi
+  
+  # Delete all current objects (handles large buckets)
   aws s3 rm s3://$BUCKET --recursive --region $REGION 2>/dev/null || true
   
-  # Delete all versions
-  aws s3api delete-objects --bucket $BUCKET --delete "$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)" --region $REGION 2>/dev/null || true
+  # Delete all versions in batches
+  local HAS_VERSIONS=true
+  while [ "$HAS_VERSIONS" = true ]; do
+    local VERSIONS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)
+    if [ "$VERSIONS" != "null" ] && [ -n "$VERSIONS" ] && [ "$VERSIONS" != "{}" ]; then
+      aws s3api delete-objects --bucket $BUCKET --delete "$VERSIONS" --region $REGION 2>/dev/null || true
+    else
+      HAS_VERSIONS=false
+    fi
+  done
   
-  # Delete all delete markers
-  aws s3api delete-objects --bucket $BUCKET --delete "$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)" --region $REGION 2>/dev/null || true
+  # Delete all delete markers in batches
+  local HAS_MARKERS=true
+  while [ "$HAS_MARKERS" = true ]; do
+    local MARKERS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)
+    if [ "$MARKERS" != "null" ] && [ -n "$MARKERS" ] && [ "$MARKERS" != "{}" ]; then
+      aws s3api delete-objects --bucket $BUCKET --delete "$MARKERS" --region $REGION 2>/dev/null || true
+    else
+      HAS_MARKERS=false
+    fi
+  done
+  
+  echo "  ✅ Bucket emptied"
 }
 
 if [ -n "$FRONTEND_BUCKET" ]; then
   empty_bucket $FRONTEND_BUCKET
-  echo "✅ Frontend bucket emptied"
 fi
 
 if [ -n "$DOCS_BUCKET" ]; then
   empty_bucket $DOCS_BUCKET
-  echo "✅ Docs bucket emptied"
+fi
+
+# Also empty SEC filings bucket
+SEC_BUCKET=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-infra --region $REGION --query 'Stacks[0].Outputs[?OutputKey==`SECFilingsBucketName`].OutputValue' --output text 2>/dev/null || echo "")
+if [ -n "$SEC_BUCKET" ]; then
+  empty_bucket $SEC_BUCKET
 fi
 
 # Step 4: Delete CloudFormation stacks
