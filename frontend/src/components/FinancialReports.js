@@ -291,15 +291,18 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
       
       setAddBankStatus('✅ ' + result.message + ' Bank will appear in the list shortly.');
       
-      // Refresh the RAG banks list after a short delay
+      // Refresh the RAG banks list after files are uploaded (30 seconds)
       setTimeout(async () => {
         await fetchRagBanks();
-        setShowAddBankDialog(false);
-        setAddBankSearch('');
-        setAddBankResults([]);
-        setAddBankStatus('');
-        setAddingToRAG(false);
-      }, 3000);
+        setAddBankStatus('✅ ' + result.message + ' Refreshing bank list...');
+        setTimeout(() => {
+          setShowAddBankDialog(false);
+          setAddBankSearch('');
+          setAddBankResults([]);
+          setAddBankStatus('');
+          setAddingToRAG(false);
+        }, 2000);
+      }, 30000);
     } catch (err) {
       setAddBankStatus('❌ Failed: ' + err.message);
       setAddingToRAG(false);
@@ -435,14 +438,26 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   Select a bank {ragBanks.length > 0 && `(${ragBanks.length} available)`}:
                 </Typography>
-                <Button 
-                  variant="outlined" 
-                  size="small"
-                  onClick={() => setShowAddBankDialog(true)}
-                  sx={{ textTransform: 'none' }}
-                >
-                  ➕ Add Bank to RAG
-                </Button>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button 
+                    variant="text" 
+                    size="small"
+                    onClick={fetchRagBanks}
+                    disabled={loadingRagBanks}
+                    sx={{ textTransform: 'none', minWidth: 'auto' }}
+                    title="Refresh bank list"
+                  >
+                    🔄 Refresh
+                  </Button>
+                  <Button 
+                    variant="outlined" 
+                    size="small"
+                    onClick={() => setShowAddBankDialog(true)}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    ➕ Add Bank to RAG
+                  </Button>
+                </Box>
               </Box>
               {loadingRagBanks ? (
                 <Box sx={{ textAlign: 'center', py: 3 }}>
