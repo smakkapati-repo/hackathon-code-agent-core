@@ -5,15 +5,18 @@ echo "🛡️ Attaching Bedrock Guardrail to BankIQ+ Agent"
 echo "================================================"
 echo ""
 
-# Check if guardrail config exists
-if [ ! -f /tmp/guardrail_config.json ]; then
-  echo "❌ Guardrail config not found. Run create-bedrock-guardrail.py first."
+REGION=${AWS_DEFAULT_REGION:-us-east-1}
+
+# Get guardrail ID from AWS
+GUARDRAIL_ID=$(aws bedrock list-guardrails --region $REGION --query "guardrails[?name=='bankiq-guardrail'].id" --output text 2>/dev/null)
+
+if [ -z "$GUARDRAIL_ID" ]; then
+  echo "❌ Guardrail not found. Run create-bedrock-guardrail.py first."
   exit 1
 fi
 
-# Read guardrail config
-GUARDRAIL_ID=$(cat /tmp/guardrail_config.json | grep -o '"guardrailId": "[^"]*' | cut -d'"' -f4)
-GUARDRAIL_VERSION=$(cat /tmp/guardrail_config.json | grep -o '"version": "[^"]*' | cut -d'"' -f4)
+# Get latest version
+GUARDRAIL_VERSION=$(aws bedrock get-guardrail --guardrail-identifier $GUARDRAIL_ID --region $REGION --query 'version' --output text 2>/dev/null || echo "1")
 
 echo "Guardrail ID: $GUARDRAIL_ID"
 echo "Version: $GUARDRAIL_VERSION"
@@ -52,9 +55,7 @@ echo "📋 Updated configuration:"
 cat backend/.bedrock_agentcore.yaml
 echo ""
 echo "================================================"
-echo "🚀 NEXT STEP: Redeploy agent"
+echo "🚀 Guardrail attached to agent config"
 echo "================================================"
 echo ""
-echo "Run: cd backend && agentcore launch -auc"
-echo ""
-echo "This will update your agent with guardrail protection."
+echo "Note: Guardrail will be active on next agent deployment"

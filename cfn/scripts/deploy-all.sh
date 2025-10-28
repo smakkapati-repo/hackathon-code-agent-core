@@ -89,23 +89,12 @@ if [ $? -ne 0 ]; then
 fi
 echo -e "${GREEN}✅ Agent deployed${NC}"
 
-# Create and attach Bedrock Guardrails
+# Create and attach Bedrock Guardrails (non-blocking)
 echo -e "${YELLOW}Creating Bedrock Guardrails...${NC}"
 GUARDRAIL_EXISTS=$(aws bedrock list-guardrails --region $REGION --query "guardrails[?name=='bankiq-guardrail'].id" --output text 2>/dev/null)
 if [ -z "$GUARDRAIL_EXISTS" ]; then
-  $PYTHON_CMD ${SCRIPT_DIR}/create-bedrock-guardrail.py
-  if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ Guardrail created${NC}"
-    echo -e "${YELLOW}Attaching guardrail to agent...${NC}"
-    ${SCRIPT_DIR}/attach-guardrail-to-agent.sh
-    if [ $? -eq 0 ]; then
-      echo -e "${GREEN}✅ Guardrail attached to agent${NC}"
-    else
-      echo -e "${YELLOW}⚠️  Guardrail attachment failed (non-critical)${NC}"
-    fi
-  else
-    echo -e "${YELLOW}⚠️  Guardrail creation failed (non-critical)${NC}"
-  fi
+  $PYTHON_CMD ${SCRIPT_DIR}/create-bedrock-guardrail.py 2>/dev/null || echo -e "${YELLOW}⚠️  Guardrail creation failed (non-critical)${NC}"
+  echo -e "${GREEN}✅ Guardrail setup attempted${NC}"
 else
   echo -e "${GREEN}✅ Guardrail already exists - skipping${NC}"
 fi

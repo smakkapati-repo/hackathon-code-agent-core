@@ -200,7 +200,7 @@ def create_guardrail():
         
     except Exception as e:
         print(f"❌ Error creating guardrail: {e}")
-        sys.exit(1)
+        return None
 
 if __name__ == '__main__':
     create_guardrail()

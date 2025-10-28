@@ -125,7 +125,22 @@ if [ -n "$AGENT_ECR" ]; then
   echo "✅ Agent ECR repository deleted"
 fi
 
-# Step 2.5: Delete RAG Knowledge Base
+# Step 2.5: Delete OpenSearch Serverless collection (MUST BE BEFORE STACK DELETION)
+echo -e "${YELLOW}🗑️  Deleting OpenSearch Serverless collections...${NC}"
+COLLECTIONS=$(aws opensearchserverless list-collections --region $REGION --query "collectionSummaries[?contains(name, 'bankiq')].id" --output text 2>/dev/null || echo "")
+if [ -n "$COLLECTIONS" ]; then
+  for COLL_ID in $COLLECTIONS; do
+    echo "Deleting OpenSearch collection: $COLL_ID"
+    aws opensearchserverless delete-collection --id $COLL_ID --region $REGION 2>/dev/null || true
+  done
+  echo "⏳ Waiting 30 seconds for OpenSearch deletion to propagate..."
+  sleep 30
+  echo "✅ OpenSearch collections deleted"
+else
+  echo "⚠️  No OpenSearch collections found"
+fi
+
+# Step 2.6: Delete RAG Knowledge Base
 echo -e "${YELLOW}🗑️  Deleting RAG Knowledge Base...${NC}"
 if command -v aws &> /dev/null; then
   # List and delete knowledge bases
