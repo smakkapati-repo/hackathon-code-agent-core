@@ -1,12 +1,19 @@
 #!/bin/bash
 set -e
 
+# Windows Git Bash: Add Node.js to PATH if not already present
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+  if ! command -v node &> /dev/null; then
+    export PATH="$PATH:/c/Program Files/nodejs:/c/Program Files (x86)/nodejs"
+  fi
+fi
+
 STACK_NAME=${1:-bankiq}
 REGION=${AWS_DEFAULT_REGION:-${2:-$(aws configure get region 2>/dev/null || echo "us-east-1")}}
 
 echo "=========================================="
 echo "Deploy Frontend"
-echo "=========================================="
+echo "========================================="
 
 # Load dependencies
 FRONTEND_BUCKET=$(cat /tmp/frontend_bucket.txt)

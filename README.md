@@ -264,6 +264,9 @@ pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests lxml
 Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 choco install python git awscli nodejs jq -y
 
+# IMPORTANT: Close and reopen Git Bash/PowerShell after installation
+# This ensures Node.js and other tools are in your PATH
+
 # Install Python dependencies
 pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests lxml
 
