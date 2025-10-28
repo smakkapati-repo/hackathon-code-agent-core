@@ -1479,7 +1479,7 @@ app.post('/api/add-bank-to-rag', async (req, res) => {
     // Spawn Python script to download and upload (it handles HTML parsing and cleaning)
     logger.info(`Spawning Python script to download ${targetFilings.length} filings for ${bankName}...`);
     
-    const scriptPath = process.env.DOCKER_CONTAINER ? '/app/scripts/download-single-bank.py' : path.join(__dirname, 'scripts/download-single-bank.py');
+    const scriptPath = path.join(__dirname, 'scripts/download-single-bank.py');
     const pythonProcess = spawn('python3', [scriptPath, bankFolder, paddedCik, s3BucketName]);
     
     let output = '';
