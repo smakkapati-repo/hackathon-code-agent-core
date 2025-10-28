@@ -386,6 +386,24 @@ fi
 if [[ "$INFRA_STACK_STATUS" != "NOT_FOUND" && "$INFRA_STACK_STATUS" != "DELETE_COMPLETE" ]]; then
   echo "Deleting ${STACK_NAME}-infra stack (base infrastructure - LAST, status: $INFRA_STACK_STATUS)..."
   
+  # If stack is in DELETE_FAILED, retry with resource retention
+  if [[ "$INFRA_STACK_STATUS" == "DELETE_FAILED" ]]; then
+    echo "⚠️  Stack in DELETE_FAILED state, retrying with resource retention..."
+    FAILED_RESOURCES=$(get_failed_resources ${STACK_NAME}-infra)
+    if [ -n "$FAILED_RESOURCES" ]; then
+      echo "Retaining failed resources: $FAILED_RESOURCES"
+      aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION --retain-resources $FAILED_RESOURCES
+    else
+      aws cloudformation delete-stack --stack-name ${STACK_NAME}-infra --region $REGION
+    fi
+    
+    echo -e "${YELLOW}⏳ Waiting for infra stack deletion...${NC}"
+    aws cloudformation wait stack-delete-complete --stack-name ${STACK_NAME}-infra --region $REGION 2>/dev/null || echo "⚠️  Deletion completed"
+    echo -e "${GREEN}✅ Infra stack deleted${NC}"
+    echo ""
+  else
+  fi
+  
   # Get VPC ID for ENI cleanup
   VPC_ID=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME}-infra --region $REGION --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text 2>/dev/null || echo "")
   

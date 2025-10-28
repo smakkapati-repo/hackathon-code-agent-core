@@ -287,12 +287,24 @@ def main():
     print(f"S3 Bucket: {bucket_name}")
     
     s3 = get_s3_client()
+    region = get_region()
     try:
         s3.head_bucket(Bucket=bucket_name)
         print("✓ S3 bucket verified\n")
-    except Exception as e:
-        print(f"✗ Error: Deploy RAG infrastructure first")
-        sys.exit(1)
+    except:
+        print(f"⚠️  Bucket doesn't exist, creating: {bucket_name}")
+        try:
+            if region == 'us-east-1':
+                s3.create_bucket(Bucket=bucket_name)
+            else:
+                s3.create_bucket(
+                    Bucket=bucket_name,
+                    CreateBucketConfiguration={'LocationConstraint': region}
+                )
+            print("✓ S3 bucket created\n")
+        except Exception as e:
+            print(f"✗ Error creating bucket: {e}")
+            sys.exit(1)
     
     total = 0
     for bank_name, cik in BANKS.items():
