@@ -261,24 +261,24 @@ empty_bucket() {
   
   # Delete all versions in batches (max 10 iterations to prevent infinite loops)
   for i in {1..10}; do
-    local VERSION_COUNT=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query 'length(Versions)' --output text 2>/dev/null || echo "0")
+    local VERSION_COUNT=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query 'length(Versions)' --output text --no-paginate 2>/dev/null || echo "0")
     if [ "$VERSION_COUNT" = "0" ] || [ "$VERSION_COUNT" = "None" ] || [ -z "$VERSION_COUNT" ]; then
       break
     fi
     echo "  Deleting $VERSION_COUNT versions (batch $i)..."
-    local VERSIONS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)
-    aws s3api delete-objects --bucket $BUCKET --delete "$VERSIONS" --region $REGION 2>/dev/null || true
+    local VERSIONS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --no-paginate 2>/dev/null)
+    aws s3api delete-objects --bucket $BUCKET --delete "$VERSIONS" --region $REGION --no-paginate 2>/dev/null || true
   done
   
   # Delete all delete markers in batches (max 10 iterations)
   for i in {1..10}; do
-    local MARKER_COUNT=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query 'length(DeleteMarkers)' --output text 2>/dev/null || echo "0")
+    local MARKER_COUNT=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query 'length(DeleteMarkers)' --output text --no-paginate 2>/dev/null || echo "0")
     if [ "$MARKER_COUNT" = "0" ] || [ "$MARKER_COUNT" = "None" ] || [ -z "$MARKER_COUNT" ]; then
       break
     fi
     echo "  Deleting $MARKER_COUNT markers (batch $i)..."
-    local MARKERS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' 2>/dev/null)
-    aws s3api delete-objects --bucket $BUCKET --delete "$MARKERS" --region $REGION 2>/dev/null || true
+    local MARKERS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --no-paginate 2>/dev/null)
+    aws s3api delete-objects --bucket $BUCKET --delete "$MARKERS" --region $REGION --no-paginate 2>/dev/null || true
   done
   
   echo "  ✅ Bucket emptied"
