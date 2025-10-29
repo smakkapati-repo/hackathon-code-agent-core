@@ -11,6 +11,7 @@ import requests
 import boto3
 import re
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Install dependencies if needed
 try:
@@ -306,10 +307,19 @@ def main():
             print(f"✗ Error creating bucket: {e}")
             sys.exit(1)
     
+    # Parallel download with 5 workers (balanced speed + SEC rate limits)
     total = 0
-    for bank_name, cik in BANKS.items():
-        total += download_bank_filings(bank_name, cik, bucket_name)
-        time.sleep(2)  # Rate limiting
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(download_bank_filings, bank_name, cik, bucket_name): bank_name 
+                   for bank_name, cik in BANKS.items()}
+        
+        for future in as_completed(futures):
+            bank_name = futures[future]
+            try:
+                count = future.result()
+                total += count
+            except Exception as e:
+                print(f"\n❌ {bank_name} failed: {e}")
     
     print(f"\n{'='*60}")
     print(f"COMPLETE: {total} filings downloaded")
