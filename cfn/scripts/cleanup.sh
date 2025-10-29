@@ -259,25 +259,23 @@ empty_bucket() {
   # Delete all current objects (handles large buckets)
   aws s3 rm s3://$BUCKET --recursive --region $REGION 2>/dev/null || true
   
-  # Delete all versions in batches (increased to 50 iterations)
+  # Delete all versions in batches
   for i in {1..50}; do
-    local VERSIONS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json --no-cli-pager 2>/dev/null)
-    local VERSION_COUNT=$(echo "$VERSIONS" | grep -c '"Key"' || echo "0")
-    if [ "$VERSION_COUNT" = "0" ]; then
+    local VERSIONS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json --no-cli-pager 2>/dev/null || echo '{"Objects":null}')
+    if [ "$VERSIONS" = '{"Objects":null}' ] || [ "$VERSIONS" = "" ] || echo "$VERSIONS" | grep -q '"Objects":null'; then
       break
     fi
-    echo "  Deleting $VERSION_COUNT versions (batch $i)..."
+    echo "  Deleting versions (batch $i)..."
     aws s3api delete-objects --bucket $BUCKET --delete "$VERSIONS" --region $REGION --no-cli-pager 2>/dev/null || true
   done
   
-  # Delete all delete markers in batches (increased to 50 iterations)
+  # Delete all delete markers in batches
   for i in {1..50}; do
-    local MARKERS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json --no-cli-pager 2>/dev/null)
-    local MARKER_COUNT=$(echo "$MARKERS" | grep -c '"Key"' || echo "0")
-    if [ "$MARKER_COUNT" = "0" ]; then
+    local MARKERS=$(aws s3api list-object-versions --bucket $BUCKET --max-items 1000 --region $REGION --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json --no-cli-pager 2>/dev/null || echo '{"Objects":null}')
+    if [ "$MARKERS" = '{"Objects":null}' ] || [ "$MARKERS" = "" ] || echo "$MARKERS" | grep -q '"Objects":null'; then
       break
     fi
-    echo "  Deleting $MARKER_COUNT markers (batch $i)..."
+    echo "  Deleting markers (batch $i)..."
     aws s3api delete-objects --bucket $BUCKET --delete "$MARKERS" --region $REGION --no-cli-pager 2>/dev/null || true
   done
   
