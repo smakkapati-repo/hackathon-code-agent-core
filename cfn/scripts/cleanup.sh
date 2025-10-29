@@ -125,31 +125,22 @@ if [ -n "$AGENT_ECR" ]; then
   echo "✅ Agent ECR repository deleted"
 fi
 
-# Step 2.5: Delete RAG Knowledge Base (BEFORE OpenSearch)
+# Step 2.5: Delete RAG Knowledge Base (only current deployment)
 echo -e "${YELLOW}🗑️  Deleting RAG Knowledge Base...${NC}"
-if command -v aws &> /dev/null; then
-  # List and delete knowledge bases
-  KB_IDS=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?contains(name, 'bankiq')].knowledgeBaseId" --output text 2>/dev/null || echo "")
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
+if [ -n "$ACCOUNT_ID" ]; then
+  KB_IDS=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?contains(name, '$ACCOUNT_ID')].knowledgeBaseId" --output text 2>/dev/null || echo "")
   if [ -n "$KB_IDS" ]; then
     for KB_ID in $KB_IDS; do
       echo "Deleting Knowledge Base: $KB_ID"
-      # Delete data sources first
-      DS_IDS=$(aws bedrock-agent list-data-sources --knowledge-base-id $KB_ID --region $REGION --query "dataSourceSummaries[].dataSourceId" --output text 2>/dev/null || echo "")
-      for DS_ID in $DS_IDS; do
-        echo "  Deleting data source: $DS_ID"
-        aws bedrock-agent delete-data-source --knowledge-base-id $KB_ID --data-source-id $DS_ID --region $REGION 2>/dev/null || true
-      done
-      echo "  Waiting 30 seconds for data sources to delete..."
-      sleep 30
-      # Delete knowledge base
-      aws bedrock-agent delete-knowledge-base --knowledge-base-id $KB_ID --region $REGION 2>/dev/null || true
+      aws bedrock-agent delete-knowledge-base --knowledge-base-id $KB_ID --region $REGION 2>/dev/null || echo "  ⚠️  KB deletion failed"
     done
-    echo "⏳ Waiting 30 seconds for KB deletion to complete..."
-    sleep 30
     echo "✅ RAG Knowledge Base deletion attempted"
   else
-    echo "⚠️  No RAG Knowledge Bases found"
+    echo "⚠️  No matching Knowledge Bases found"
   fi
+else
+  echo "⚠️  Could not get account ID, skipping KB deletion"
 fi
 
 # Step 2.6: Delete OpenSearch Serverless collection (AFTER KB deletion)
