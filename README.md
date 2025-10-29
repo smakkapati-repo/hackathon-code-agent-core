@@ -258,20 +258,21 @@ brew install awscli node python@3.11 git
 pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests lxml
 ```
 
-**Windows (PowerShell as Administrator):**
-```powershell
-# Install Chocolatey + all tools
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-choco install python git awscli nodejs jq -y
+**Windows (Git Bash - Recommended):**
+```bash
+# Install Chocolatey (run in PowerShell as Administrator first)
+# Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 
-# IMPORTANT: Close and reopen Git Bash/PowerShell after installation
-# This ensures Node.js and other tools are in your PATH
+# Install tools (run in PowerShell as Administrator)
+# choco install python git awscli nodejs jq -y
 
-# Install Python dependencies
+# IMPORTANT: Close PowerShell and open Git Bash for remaining steps
+
+# Install Python dependencies (in Git Bash)
 pip install bedrock-agentcore-starter-toolkit boto3 beautifulsoup4 requests lxml
 
-# Add Python Scripts to PATH permanently (for agentcore command)
-echo 'export PATH="$PATH:/d/Users/$USER/AppData/Roaming/Python/Python314/Scripts"' >> ~/.bashrc
+# Add Python Scripts to PATH (in Git Bash)
+echo 'export PATH="$PATH:/c/Users/$USER/AppData/Roaming/Python/Python311/Scripts"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
