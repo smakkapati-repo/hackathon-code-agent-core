@@ -363,17 +363,20 @@ Your detailed analysis here...`;
   },
 
   async chatWithLocalFiles(message, analyzedDocs) {
-    let prompt = message;
-    if (analyzedDocs && analyzedDocs.length > 0) {
-      const doc = analyzedDocs[0];
-      if (doc.s3_key) {
-        prompt = `Answer this question about ${doc.bank_name}'s ${doc.form_type} filing: ${message}
+    if (!analyzedDocs || analyzedDocs.length === 0) {
+      throw new Error('No documents uploaded. Please upload a PDF first.');
+    }
+    
+    const doc = analyzedDocs[0];
+    
+    if (!doc.s3_key) {
+      throw new Error('Document not properly uploaded to S3. Please try uploading again.');
+    }
+    
+    const prompt = `Answer this question about ${doc.bank_name}'s ${doc.form_type} filing: ${message}
 
 IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.bank_name}") to retrieve the document data, then provide a 3-4 paragraph professional analysis.`;
-      } else {
-        prompt = `Answer this question about ${doc.bank_name} ${doc.form_type} ${doc.year}: ${message}`;
-      }
-    }
+    
     const job = await this.submitJob(prompt);
     const result = await this.pollJobUntilComplete(job.jobId);
     return { response: result.result, sources: [] };

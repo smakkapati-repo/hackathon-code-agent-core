@@ -123,16 +123,19 @@ def create_opensearch_index():
         client.indices.create(index=index_name, body=index_body)
         print(f"✅ Created index '{index_name}' with 1024-dim vector field")
         
-        # Wait and verify index is accessible
-        print(f"⏳ Waiting 10 seconds for index to be fully available...")
-        time.sleep(10)
+        # Poll until index is accessible
+        print(f"⏳ Waiting for index to be fully available...")
+        max_wait = 60
+        waited = 0
+        while waited < max_wait:
+            if client.indices.exists(index=index_name):
+                print(f"✅ Index verified and accessible ({waited}s)")
+                return True
+            time.sleep(5)
+            waited += 5
         
-        if client.indices.exists(index=index_name):
-            print(f"✅ Index verified and accessible")
-            return True
-        else:
-            print(f"⚠️  Index created but not yet accessible")
-            return False
+        print(f"⚠️  Index created but not accessible after {max_wait}s")
+        return False
             
     except Exception as e:
         print(f"❌ Error creating index: {e}")
@@ -160,9 +163,37 @@ def create_knowledge_base():
     except Exception as e:
         print(f"   Error checking existing KBs: {e}")
     
-    # Additional wait for Bedrock to recognize the index
-    print("⏳ Waiting 30 seconds for Bedrock to recognize the index...")
-    time.sleep(30)
+    # Poll OpenSearch to ensure index is stable before KB creation
+    print("⏳ Verifying index stability...")
+    aoss = boto3.client('opensearchserverless')
+    outputs = get_stack_outputs()
+    collection_endpoint = outputs['VectorStoreCollectionEndpoint']
+    host = collection_endpoint.replace('https://', '')
+    credentials = boto3.Session().get_credentials()
+    auth = AWSV4SignerAuth(credentials, boto3.session.Session().region_name, 'aoss')
+    client = OpenSearch(
+        hosts=[{'host': host, 'port': 443}],
+        http_auth=auth,
+        use_ssl=True,
+        verify_certs=True,
+        connection_class=RequestsHttpConnection,
+        timeout=30
+    )
+    
+    max_wait = 60
+    waited = 0
+    while waited < max_wait:
+        try:
+            if client.indices.exists(index='bankiq-sec-index'):
+                health = client.cluster.health()
+                if health['status'] in ['green', 'yellow']:
+                    print(f"✅ Index stable and ready ({waited}s)")
+                    break
+            time.sleep(5)
+            waited += 5
+        except:
+            time.sleep(5)
+            waited += 5
     
     try:
         response = bedrock.create_knowledge_base(
@@ -298,9 +329,21 @@ def main():
         print("\n❌ OpenSearch collection not ready")
         sys.exit(1)
     
-    # Step 2: Wait for access policies to propagate
-    print("\n⏳ Waiting 30 seconds for access policies to propagate...")
-    time.sleep(30)
+    # Step 2: Poll for access policy propagation
+    print("\n⏳ Waiting for access policies to propagate...")
+    aoss = boto3.client('opensearchserverless')
+    max_wait = 90
+    waited = 0
+    while waited < max_wait:
+        try:
+            policies = aoss.list_access_policies(type='data')
+            if any('bankiq' in p.get('name', '') for p in policies.get('accessPolicySummaries', [])):
+                print(f"✅ Access policies active ({waited}s)")
+                break
+        except:
+            pass
+        time.sleep(5)
+        waited += 5
     
     # Step 3: Create OpenSearch index (REQUIRED before KB creation)
     if not create_opensearch_index():

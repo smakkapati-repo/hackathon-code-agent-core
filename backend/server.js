@@ -639,7 +639,7 @@ app.post('/api/upload-pdf', async (req, res) => {
         console.error(`[${new Date().toISOString()}] Raw output was:`, extractOutput);
       }
 
-      // Step 2: Upload to S3
+      // Step 2: Upload to S3 (REQUIRED for chat functionality)
       let s3Key = null;
       try {
         const AWS = require('aws-sdk');
@@ -665,10 +665,25 @@ app.post('/api/upload-pdf', async (req, res) => {
           }
         }).promise();
 
-        console.log(`[${new Date().toISOString()}] ✅ Uploaded to S3: ${s3Key}`);
+        // Verify upload completed
+        await s3.headObject({
+          Bucket: process.env.UPLOADED_DOCS_BUCKET || 'bankiq-uploaded-docs-prod',
+          Key: s3Key
+        }).promise();
+
+        console.log(`[${new Date().toISOString()}] ✅ Uploaded and verified: ${s3Key}`);
       } catch (s3Error) {
         console.error(`[${new Date().toISOString()}] ❌ S3 upload failed:`, s3Error.message);
-        // Continue anyway, just without S3 key
+        return res.status(500).json({ 
+          error: `S3 upload failed: ${s3Error.message}. Chat functionality requires S3 storage.`,
+          details: 'Check UPLOADED_DOCS_BUCKET environment variable and IAM permissions'
+        });
+      }
+      
+      if (!s3Key) {
+        return res.status(500).json({ 
+          error: 'Failed to upload document to S3. Chat functionality requires S3 storage.'
+        });
       }
 
       documents.push({
