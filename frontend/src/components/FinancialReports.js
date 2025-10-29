@@ -479,11 +479,14 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
                           variant={selectedBank === displayName ? 'contained' : 'outlined'}
                           onClick={() => {
                             setSelectedBank(displayName);
-                            setSelectedBankCik(null); // CIK not needed for RAG mode
+                            setSelectedBankCik(null);
                             setChatHistory([]);
                             setFullReport('');
                             setError('');
                             setReportLoading(false);
+                            setReports({ '10-K': [], '10-Q': [] });
+                            // Force reload reports
+                            setTimeout(() => loadReports(), 100);
                           }}
                           sx={{ textTransform: 'none', fontSize: '0.8rem' }}
                         >
