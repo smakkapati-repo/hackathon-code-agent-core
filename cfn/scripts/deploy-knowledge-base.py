@@ -32,7 +32,7 @@ def check_collection_status():
     
     print("\n🔍 Checking OpenSearch collection status...")
     
-    max_wait = 120
+    max_wait = 300
     waited = 0
     while waited < max_wait:
         try:
