@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Box, Typography, Card, CardContent, Grid, Button,
   TextField, Paper, Chip, List, ListItem, ListItemText,
@@ -40,6 +40,7 @@ function FinancialReports() {
   const [addBankStatus, setAddBankStatus] = useState('');
   const [ragBanks, setRagBanks] = useState([]);
   const [loadingRagBanks, setLoadingRagBanks] = useState(false);
+  const pollingRef = useRef(null);
 
   // Fallback popular banks with CIKs for search/selection
   const popularBanks = {
@@ -86,6 +87,27 @@ function FinancialReports() {
       }
     };
     checkRagAvailability();
+    
+    // Check for completed report in localStorage
+    const completedReport = localStorage.getItem('completedReport');
+    if (completedReport) {
+      setFullReport(completedReport);
+      localStorage.removeItem('completedReport');
+    }
+    
+    // Check for errors
+    const reportError = localStorage.getItem('reportError');
+    if (reportError) {
+      setError(reportError);
+      localStorage.removeItem('reportError');
+    }
+    
+    // Check if job is still pending
+    const pendingJobId = localStorage.getItem('pendingReportJobId');
+    if (pendingJobId) {
+      setReportLoading(true);
+      setPollingStatus('Report generation in progress...');
+    }
   }, []);
 
   useEffect(() => {
@@ -222,28 +244,49 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
       console.log(`Job ${jobId} submitted, polling for completion...`);
       setPollingStatus('Generating report (this may take 1-2 minutes)...');
       
-      // Poll for completion (max 4 minutes = 120 attempts * 2 seconds)
-      const result = await api.pollJobUntilComplete(jobId, 120, 2000);
+      // Store job ID in localStorage and start background polling
+      localStorage.setItem('pendingReportJobId', jobId);
       
-      if (result.status === 'failed') {
-        throw new Error(result.error || 'Job failed');
-      }
+      // Start polling in background (continues even if component unmounts)
+      const pollInBackground = async () => {
+        try {
+          const result = await api.pollJobUntilComplete(jobId, 120, 2000);
+          
+          if (result.status === 'failed') {
+            localStorage.setItem('reportError', result.error || 'Job failed');
+            localStorage.removeItem('pendingReportJobId');
+            return;
+          }
+          
+          // Remove DATA: line from report display
+          let cleanReport = result.result;
+          if (cleanReport.includes('DATA:')) {
+            cleanReport = cleanReport.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
+          }
+          
+          // Store completed report in localStorage
+          localStorage.setItem('completedReport', cleanReport);
+          localStorage.removeItem('pendingReportJobId');
+          
+          // Update state if component is still mounted
+          setFullReport(cleanReport);
+          setPollingStatus('');
+          setReportLoading(false);
+          console.log('Full report generated successfully');
+        } catch (err) {
+          console.error('Background polling error:', err);
+          localStorage.setItem('reportError', err.message);
+          localStorage.removeItem('pendingReportJobId');
+        }
+      };
       
-      // Remove DATA: line from report display
-      let cleanReport = result.result;
-      if (cleanReport.includes('DATA:')) {
-        cleanReport = cleanReport.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
-      }
-      
-      setFullReport(cleanReport);
-      setPollingStatus('');
-      console.log('Full report generated successfully');
+      // Start background polling (don't await)
+      pollInBackground();
       
     } catch (err) {
       console.error('Full report generation error:', err);
       setError('Failed to generate full report: ' + err.message);
       setPollingStatus('');
-    } finally {
       setReportLoading(false);
     }
   };

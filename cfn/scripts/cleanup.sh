@@ -125,22 +125,17 @@ if [ -n "$AGENT_ECR" ]; then
   echo "✅ Agent ECR repository deleted"
 fi
 
-# Step 2.5: Delete RAG Knowledge Base (only current deployment)
+# Step 2.5: Delete RAG Knowledge Base (all bankiq KBs)
 echo -e "${YELLOW}🗑️  Deleting RAG Knowledge Base...${NC}"
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
-if [ -n "$ACCOUNT_ID" ]; then
-  KB_IDS=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?contains(name, '$ACCOUNT_ID')].knowledgeBaseId" --output text 2>/dev/null || echo "")
-  if [ -n "$KB_IDS" ]; then
-    for KB_ID in $KB_IDS; do
-      echo "Deleting Knowledge Base: $KB_ID"
-      aws bedrock-agent delete-knowledge-base --knowledge-base-id $KB_ID --region $REGION 2>/dev/null || echo "  ⚠️  KB deletion failed"
-    done
-    echo "✅ RAG Knowledge Base deletion attempted"
-  else
-    echo "⚠️  No matching Knowledge Bases found"
-  fi
+KB_IDS=$(aws bedrock-agent list-knowledge-bases --region $REGION --query "knowledgeBaseSummaries[?contains(name, 'bankiq')].knowledgeBaseId" --output text 2>/dev/null || echo "")
+if [ -n "$KB_IDS" ]; then
+  for KB_ID in $KB_IDS; do
+    echo "Deleting Knowledge Base: $KB_ID"
+    aws bedrock-agent delete-knowledge-base --knowledge-base-id $KB_ID --region $REGION 2>/dev/null || echo "  ⚠️  KB deletion failed"
+  done
+  echo "✅ RAG Knowledge Base deletion attempted"
 else
-  echo "⚠️  Could not get account ID, skipping KB deletion"
+  echo "⚠️  No Knowledge Bases found"
 fi
 
 # Step 2.6: Delete OpenSearch Serverless collection (AFTER KB deletion)
