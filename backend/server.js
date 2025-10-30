@@ -1385,41 +1385,71 @@ app.post('/api/get-rag-filings', async (req, res) => {
   
   try {
     const s3BucketName = process.env.SEC_FILINGS_BUCKET || 'bankiq-sec-filings-164543933824-prod';
+    const AWS = require('aws-sdk');
+    const s3 = new AWS.S3({ region: process.env.AWS_REGION || 'us-east-1' });
     
-    // Map bank names to S3 folder names
-    const bankFolderMap = {
-      'JPMORGAN CHASE & CO': 'JPMORGAN-CHASE',
-      'BANK OF AMERICA CORP': 'BANK-OF-AMERICA',
-      'WELLS FARGO & COMPANY': 'WELLS-FARGO',
-      'CITIGROUP INC': 'CITIGROUP',
-      'GOLDMAN SACHS GROUP INC': 'GOLDMAN-SACHS',
-      'MORGAN STANLEY': 'MORGAN-STANLEY',
-      'U.S. BANCORP': 'US-BANCORP',
-      'PNC FINANCIAL SERVICES GROUP INC': 'PNC-FINANCIAL',
-      'CAPITAL ONE FINANCIAL CORP': 'CAPITAL-ONE',
-      'TRUIST FINANCIAL CORP': 'TRUIST-FINANCIAL',
-      'ALLY FINANCIAL INC': 'ALLY-FINANCIAL-INC'
-    };
+    // First, list all folders in S3 to find exact match
+    const foldersResponse = await s3.listObjectsV2({
+      Bucket: s3BucketName,
+      Delimiter: '/'
+    }).promise();
     
-    const bankFolder = bankFolderMap[bankName.toUpperCase()] || bankName.toUpperCase()
+    const availableFolders = (foldersResponse.CommonPrefixes || [])
+      .map(prefix => prefix.Prefix.replace('/', ''));
+    
+    logger.debug(`Available S3 folders: ${availableFolders.join(', ')}`);
+    
+    // Try to match bank name to folder (case-insensitive, flexible matching)
+    const normalizedBankName = bankName.toUpperCase()
       .replace(/ & /g, '-')
+      .replace(/ CORP$/g, '')
+      .replace(/ INC$/g, '')
+      .replace(/ GROUP$/g, '')
+      .replace(/ CORPORATION$/g, '')
+      .replace(/ FINANCIAL$/g, '')
       .replace(/ /g, '-')
       .replace(/\./g, '');
     
-    const AWS = require('aws-sdk');
-    const s3 = new AWS.S3({ region: process.env.AWS_REGION || 'us-east-1' });
+    // Find best matching folder
+    let bankFolder = availableFolders.find(folder => {
+      const folderNormalized = folder.toUpperCase();
+      // Exact match
+      if (folderNormalized === normalizedBankName) return true;
+      // Contains match
+      if (folderNormalized.includes(normalizedBankName)) return true;
+      if (normalizedBankName.includes(folderNormalized)) return true;
+      // Partial match (first 2 words)
+      const firstTwoWords = normalizedBankName.split('-').slice(0, 2).join('-');
+      if (folderNormalized.includes(firstTwoWords)) return true;
+      return false;
+    });
+    
+    if (!bankFolder) {
+      logger.warn(`No S3 folder found for bank: ${bankName}. Tried: ${normalizedBankName}`);
+      return res.json({ 
+        success: false, 
+        error: `Bank "${bankName}" not found in RAG index. Available banks: ${availableFolders.join(', ')}`,
+        '10-K': [], 
+        '10-Q': [] 
+      });
+    }
+    
+    logger.info(`Matched "${bankName}" to S3 folder: ${bankFolder}`);
     
     const response = await s3.listObjectsV2({
       Bucket: s3BucketName,
       Prefix: `${bankFolder}/`
     }).promise();
+    
     const tenK = [], tenQ = [];
     
     (response.Contents || []).forEach(obj => {
       const key = obj.Key;
       if (key.includes('/10-K/')) {
         const year = key.match(/(\d{4})\.txt$/)?.[1];
-        tenK.push({ form: '10-K', filing_date: `${year}-12-31`, accession: key, year });
+        if (year) {
+          tenK.push({ form: '10-K', filing_date: `${year}-12-31`, accession: key, year });
+        }
       } else if (key.includes('/10-Q/')) {
         const match = key.match(/(\d{4})-Q(\d)\.txt$/);
         if (match) {
@@ -1429,11 +1459,11 @@ app.post('/api/get-rag-filings', async (req, res) => {
       }
     });
     
+    logger.info(`Found ${tenK.length} 10-K and ${tenQ.length} 10-Q filings for ${bankName}`);
+    
     res.json({ success: true, '10-K': tenK, '10-Q': tenQ });
   } catch (err) {
     logger.error('RAG filings error:', err);
-    logger.error('RAG filings error stack:', err.stack);
-    logger.error('Bank folder attempted:', bankFolder);
     res.json({ success: false, error: err.message, '10-K': [], '10-Q': [] });
   }
 });

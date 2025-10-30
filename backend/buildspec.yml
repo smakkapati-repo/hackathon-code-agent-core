@@ -1,5 +1,12 @@
 version: 0.2
 phases:
+  install:
+    commands:
+      - echo Downloading source from S3...
+      - aws s3 cp s3://bedrock-agentcore-codebuild-sources-164543933824-us-east-1/backend-source.zip /tmp/backend-source.zip
+      - echo Extracting source...
+      - unzip -q /tmp/backend-source.zip -d .
+      - ls -la
   pre_build:
     commands:
       - echo Logging in to Amazon ECR...
