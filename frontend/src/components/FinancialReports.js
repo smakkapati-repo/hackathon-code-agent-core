@@ -478,15 +478,18 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
                         <Button
                           variant={selectedBank === displayName ? 'contained' : 'outlined'}
                           onClick={() => {
-                            setSelectedBank(displayName);
+                            // Reset first to force useEffect trigger
+                            setSelectedBank('');
                             setSelectedBankCik(null);
                             setChatHistory([]);
                             setFullReport('');
                             setError('');
                             setReportLoading(false);
                             setReports({ '10-K': [], '10-Q': [] });
-                            // Force reload reports
-                            setTimeout(() => loadReports(), 100);
+                            // Then set new bank to trigger loadReports
+                            setTimeout(() => {
+                              setSelectedBank(displayName);
+                            }, 50);
                           }}
                           sx={{ textTransform: 'none', fontSize: '0.8rem' }}
                         >

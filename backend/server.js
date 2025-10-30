@@ -1397,13 +1397,12 @@ app.post('/api/get-rag-filings', async (req, res) => {
       'U.S. BANCORP': 'US-BANCORP',
       'PNC FINANCIAL SERVICES GROUP INC': 'PNC-FINANCIAL',
       'CAPITAL ONE FINANCIAL CORP': 'CAPITAL-ONE',
-      'TRUIST FINANCIAL CORP': 'TRUIST-FINANCIAL'
+      'TRUIST FINANCIAL CORP': 'TRUIST-FINANCIAL',
+      'ALLY FINANCIAL INC': 'ALLY-FINANCIAL-INC'
     };
     
     const bankFolder = bankFolderMap[bankName.toUpperCase()] || bankName.toUpperCase()
       .replace(/ & /g, '-')
-      .replace(/ CORP$/g, '')
-      .replace(/ INC$/g, '')
       .replace(/ /g, '-')
       .replace(/\./g, '');
     
