@@ -18,7 +18,7 @@ function Home() {
     {
       icon: <AssessmentIcon sx={{ fontSize: 48, color: 'primary.main' }} />,
       title: 'Smart Tool Selection',
-      description: 'Claude Sonnet 4.5 automatically picks from 21 specialized banking tools: FDIC data, peer comparison, SEC filings, compliance monitoring, and more',
+      description: 'Claude Sonnet 4.5 automatically picks from 18 specialized banking tools: FDIC data, peer comparison, SEC filings, compliance monitoring, and more',
       status: 'AI-Powered'
     },
     {
@@ -33,7 +33,7 @@ function Home() {
     { label: 'Banks Available', value: '500+', color: '#00778f' },
     { label: 'Metrics Tracked', value: '6+', color: '#00a897' },
     { label: 'Data Sources', value: '3', color: '#02c59b' },
-    { label: 'AI Tools', value: '21', color: '#A020F0' }
+    { label: 'AI Tools', value: '18', color: '#A020F0' }
   ];
 
   return (
