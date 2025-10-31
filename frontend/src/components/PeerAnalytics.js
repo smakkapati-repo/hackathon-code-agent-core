@@ -4,7 +4,7 @@ import {
   Box, Typography, Card, CardContent, Grid,
   FormControl, InputLabel, Select, MenuItem, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  CircularProgress, Alert, Divider
+  CircularProgress, Alert, Divider, Switch, FormControlLabel
 } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { api } from '../services/api';
@@ -29,6 +29,7 @@ function PeerAnalytics() {
   const [hasQuarterly, setHasQuarterly] = usePersistedState('peer_hasQuarterly', false);
   const [dataLoaded, setDataLoaded] = usePersistedState('peer_dataLoaded', false);
   const [hasMonthly, setHasMonthly] = useState(false);
+  const [useStreaming, setUseStreaming] = useState(true); // Streaming toggle
 
   const [bankSearchQuery, setBankSearchQuery] = useState('');
   const [bankSearchResults, setBankSearchResults] = useState([]);
@@ -97,6 +98,12 @@ function PeerAnalytics() {
   const handleAnalysis = async () => {
     if (!selectedBank || selectedPeers.length === 0 || !selectedMetric) return;
 
+    // Prevent multiple simultaneous requests
+    if (loading) {
+      console.log('Analysis already in progress');
+      return;
+    }
+
     try {
       setLoading(true);
       setError('');
@@ -159,11 +166,42 @@ function PeerAnalytics() {
         const prompt = `Analyze peer banking performance for ${selectedMetric}:\n\nBase Bank: ${apiBaseBank}\nPeer Banks: ${apiPeerBanks.join(', ')}\n\nData shows ${longFormatData.length} quarterly data points. Provide a concise 2-paragraph analysis comparing ${apiBaseBank}'s performance against peers on ${selectedMetric}, highlighting key trends and competitive positioning.`;
 
         try {
-          const job = await api.submitJob(prompt);
-          const jobResult = await api.pollJobUntilComplete(job.jobId);
-          let analysisText = jobResult.result || 'Analysis completed.';
+          let analysisText = '';
+          
+          if (useStreaming) {
+            // Streaming mode for CSV
+            setError('🔄 Analyzing CSV data (streaming)...');
+            await api.streamChat(
+              prompt,
+              null, // no bank name needed
+              null, // no reports
+              false, // not RAG
+              null, // no CIK
+              (chunk) => {
+                analysisText += chunk;
+                // Remove JSON from display in real-time (same as live mode)
+                let displayText = analysisText;
+                displayText = displayText.replace(/\{[^{}]*"data"\s*:\s*\[[^\]]*\][^{}]*\}/g, '');
+                displayText = displayText.replace(/\{[^{}]*"Bank"[^{}]*\}/g, '');
+                setAnalysis(displayText.trim() || 'Analyzing...');
+              },
+              () => {
+                console.log('CSV analysis streaming complete');
+                setError('');
+              },
+              (error) => {
+                console.log('CSV streaming failed:', error);
+                throw new Error(error);
+              }
+            );
+          } else {
+            // Polling mode for CSV
+            const job = await api.submitJob(prompt);
+            const jobResult = await api.pollJobUntilComplete(job.jobId);
+            analysisText = jobResult.result || 'Analysis completed.';
+          }
 
-          // Remove any JSON structures from the analysis (same as live mode)
+          // Remove any JSON structures from the analysis
           try {
             // Find and remove complete JSON object from tool
             const jsonPattern = /\{[^]*?"data"\s*:\s*\[[^]*?\][^]*?"base_bank"[^]*?"peer_banks"[^]*?"analysis"[^]*?"source"[^]*?\}/;
@@ -191,8 +229,61 @@ function PeerAnalytics() {
           result = { data: longFormatData, analysis: `**${selectedMetric} Analysis**\n\nShowing data visualization for uploaded CSV data comparing ${apiBaseBank} against ${apiPeerBanks.join(', ')}.` };
         }
       } else {
-        const response = await api.analyzePeers(apiBaseBank, apiPeerBanks, selectedMetric);
-        result = response.success ? response.result : response;
+        // Live mode - use streaming or polling based on toggle
+        let streamingFailed = false;
+        if (useStreaming) {
+          // Streaming mode
+          setError('🔄 Analyzing (streaming)...');
+          let fullResponse = '';
+          
+          try {
+            await api.streamPeerAnalysis(
+              apiBaseBank,
+              apiPeerBanks,
+              selectedMetric,
+              (chunk) => {
+                fullResponse += chunk;
+                // Update analysis in real-time (show partial response)
+                // Remove JSON from display (can be anywhere in the text)
+                let displayText = fullResponse;
+                // Remove complete JSON objects
+                displayText = displayText.replace(/\{[^{}]*"data"\s*:\s*\[[^\]]*\][^{}]*\}/g, '');
+                // Remove any remaining JSON-like structures
+                displayText = displayText.replace(/\{[^{}]*"Bank"[^{}]*\}/g, '');
+                setAnalysis(displayText.trim() || 'Analyzing...');
+              },
+              () => {
+                // On complete - DON'T clean up yet, let parsing happen first
+                console.log('Peer analysis streaming complete');
+                // Keep fullResponse as-is with JSON for parsing below
+                setError('');
+              },
+              (error) => {
+                console.log('Streaming failed:', error);
+                streamingFailed = true;
+              }
+            );
+            
+            // If streaming succeeded, use the response
+            if (!streamingFailed && fullResponse) {
+              result = { analysis: fullResponse, data: [] };
+            } else {
+              streamingFailed = true;
+            }
+          } catch (err) {
+            console.log('Streaming error:', err);
+            streamingFailed = true;
+          }
+        }
+        
+        // Fall back to polling if streaming is off or failed
+        if (!useStreaming || streamingFailed) {
+          if (streamingFailed) {
+            setError('⚠️ Streaming timed out, using polling mode...');
+          }
+          const response = await api.analyzePeers(apiBaseBank, apiPeerBanks, selectedMetric);
+          result = response.success ? response.result : response;
+        }
       }
 
       // Parse analysis text and extract data from agent response
@@ -202,13 +293,24 @@ function PeerAnalytics() {
       // Try to extract JSON data from agent response
       if (chartDataFromResponse.length === 0 && typeof analysisText === 'string') {
         try {
-          const jsonMatch = analysisText.match(/DATA:\s*(\{[\s\S]*?\})/s);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[1]);
-            if (parsed.data && Array.isArray(parsed.data)) {
-              chartDataFromResponse = parsed.data;
-              // Remove DATA line from analysis
-              analysisText = analysisText.replace(/DATA:\s*\{[\s\S]*?\}\s*\n*/g, '').trim();
+          // Try to find JSON object in the response (first line usually)
+          const lines = analysisText.split('\n');
+          for (const line of lines) {
+            if (line.trim().startsWith('{')) {
+              try {
+                const parsed = JSON.parse(line.trim());
+                if (parsed.data && Array.isArray(parsed.data)) {
+                  chartDataFromResponse = parsed.data;
+                  // Remove JSON line and DATA: lines from analysis
+                  analysisText = lines.filter(l => {
+                    const trimmed = l.trim();
+                    return l !== line && !trimmed.startsWith('DATA:');
+                  }).join('\n').trim();
+                  break;
+                }
+              } catch (e) {
+                // Not valid JSON, continue
+              }
             }
           }
         } catch (e) {
@@ -216,9 +318,23 @@ function PeerAnalytics() {
         }
       }
 
-      // If still no data, show error
+      // If still no data, show error with helpful message
       if (chartDataFromResponse.length === 0) {
-        setError('No data received from agent. Please try again or check if the banks exist in FDIC database.');
+        const errorMsg = useStreaming 
+          ? 'No data received. Try toggling streaming off and using polling mode.'
+          : 'No data received from agent. Please try again or check if the banks exist in FDIC database.';
+        setError(errorMsg);
+        setLoading(false);
+        return;
+      }
+
+      // Validate data structure
+      const hasValidData = chartDataFromResponse.every(item => 
+        item.Bank && item.Quarter && item.Metric && typeof item.Value === 'number'
+      );
+      
+      if (!hasValidData) {
+        setError('Received invalid data format. Please try again.');
         setLoading(false);
         return;
       }
@@ -625,6 +741,20 @@ function PeerAnalytics() {
           >
             {loading ? <CircularProgress size={24} /> : 'Analyze'}
           </Button>
+        </Grid>
+        <Grid item xs={12} md={1}>
+          <FormControlLabel
+            control={
+              <Switch 
+                checked={useStreaming} 
+                onChange={(e) => setUseStreaming(e.target.checked)}
+                disabled={loading}
+                size="small"
+              />
+            }
+            label={<Typography variant="caption">Stream {useStreaming ? '⚡' : ''}</Typography>}
+            sx={{ height: 56, display: 'flex', justifyContent: 'center' }}
+          />
         </Grid>
         <Grid item xs={12} md={1}>
           <Button

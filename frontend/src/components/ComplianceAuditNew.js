@@ -25,7 +25,9 @@ import {
   Paper,
   Avatar,
   Stack,
-  Tooltip
+  Tooltip,
+  Switch,
+  FormControlLabel
 } from '@mui/material';
 import {
   Warning,
@@ -41,6 +43,7 @@ import {
   Speed
 } from '@mui/icons-material';
 import AgentService from '../services/AgentService';
+import { api } from '../services/api';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -81,6 +84,7 @@ const ComplianceAudit = () => {
   const [dataSource, setDataSource] = usePersistedState('compliance_dataSource', '');
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [useStreaming, setUseStreaming] = useState(true); // Streaming toggle
 
   const popularBanks = {
     "JPMORGAN CHASE & CO": "0000019617",
@@ -147,21 +151,67 @@ const ComplianceAudit = () => {
     setAiAnalysis('');
     
     try {
-      const baseURL = process.env.REACT_APP_API_GATEWAY_URL || window.location.origin;
+      const prompt = `Provide a comprehensive AI-powered compliance analysis for ${selectedBank}. Use the compliance_risk_assessment and regulatory_alerts_monitor tools to analyze regulatory risks, capital adequacy, liquidity coverage, and audit findings. Include specific recommendations and risk mitigation strategies.`;
       
-      // Submit job
-      const timestamp = Date.now();
-      const randomId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
-      
-      const jobResponse = await fetch(`${baseURL}/api/jobs/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          inputText: `Provide a comprehensive AI-powered compliance analysis for ${selectedBank}. Use the compliance_risk_assessment and regulatory_alerts_monitor tools to analyze regulatory risks, capital adequacy, liquidity coverage, and audit findings. Include specific recommendations and risk mitigation strategies.`,
-          sessionId: `compliance-${timestamp}-${randomId}`,
-          jobType: 'chat'
-        })
-      });
+      if (useStreaming) {
+        // Streaming mode for AI Analysis
+        setAlerts([{
+          type: 'info',
+          message: `Generating AI analysis for ${selectedBank}... ⚡`,
+          timestamp: 'Just now'
+        }]);
+        
+        let analysisText = '';
+        await api.streamChat(
+          prompt,
+          selectedBank,
+          null,
+          false,
+          selectedBankCik,
+          (chunk) => {
+            analysisText += chunk;
+            // Remove COMPLIANCE_DATA and JSON lines from display
+            let displayText = analysisText;
+            const lines = displayText.split('\n');
+            const cleanLines = lines.filter(line => {
+              const trimmed = line.trim();
+              // Remove lines with COMPLIANCE_DATA or JSON structures
+              return !trimmed.startsWith('COMPLIANCE_DATA:') && 
+                     !trimmed.startsWith('{') && 
+                     !trimmed.startsWith('}') &&
+                     !trimmed.includes('"risk_gauges"') &&
+                     !trimmed.includes('"metrics"');
+            });
+            displayText = cleanLines.join('\n').trim();
+            setAiAnalysis(displayText || 'Analyzing...');
+          },
+          () => {
+            console.log('AI Analysis streaming complete');
+            setAlerts(prev => [{
+              type: 'success',
+              message: 'AI compliance analysis completed',
+              timestamp: 'Just now'
+            }, ...prev.slice(0, 2)]);
+          },
+          (error) => {
+            throw new Error(error);
+          }
+        );
+      } else {
+        // Polling mode (existing)
+        const baseURL = process.env.REACT_APP_API_GATEWAY_URL || window.location.origin;
+        const timestamp = Date.now();
+        const randomId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+        
+        const jobResponse = await fetch(`${baseURL}/api/jobs/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inputText: prompt,
+            sessionId: `compliance-${timestamp}-${randomId}`,
+            jobType: 'chat'
+          })
+        });
       
       if (!jobResponse.ok) {
         const errorText = await jobResponse.text();
@@ -211,8 +261,9 @@ const ComplianceAudit = () => {
         attempts++;
       }
       
-      if (attempts >= maxAttempts) {
-        throw { message: 'Analysis timeout' };
+        if (attempts >= maxAttempts) {
+          throw { message: 'Analysis timeout' };
+        }
       }
       
     } catch (error) {
@@ -232,6 +283,12 @@ const ComplianceAudit = () => {
       console.log('No bank selected');
       return;
     }
+
+    // Prevent multiple simultaneous requests
+    if (loading) {
+      console.log('Assessment already in progress');
+      return;
+    }
     
     console.log('Starting compliance assessment for:', selectedBank);
     setLoading(true);
@@ -243,61 +300,101 @@ const ComplianceAudit = () => {
     
     try {
       const baseURL = process.env.REACT_APP_API_GATEWAY_URL || window.location.origin;
-      const timestamp = Date.now();
-      const randomId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
-      
-      // Call compliance_risk_assessment tool directly
-      const jobResponse = await fetch(`${baseURL}/api/jobs/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          inputText: `Use compliance_risk_assessment("${selectedBank}") tool. Return ONLY the raw JSON output with NO explanation. Expected format: {"success": true, "overall_score": X, "scores": {...}, "metrics": {...}, "alerts": [...]}`,
-          sessionId: `compliance-${timestamp}-${randomId}`,
-          jobType: 'chat'
-        })
-      });
-      
-      if (!jobResponse.ok) {
-        throw { message: `HTTP ${jobResponse.status}` };
-      }
-      
-      const jobData = await jobResponse.json();
-      const jobId = jobData.jobId;
-      
-      if (!jobId) {
-        throw { message: 'No job ID returned' };
-      }
-      
-      console.log('Compliance job submitted:', jobId);
-      
-      // Poll for completion
-      let attempts = 0;
-      const maxAttempts = 30;
       let responseText = '';
-      
-      while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+
+      if (useStreaming) {
+        // Streaming mode
+        setAlerts([{
+          type: 'info',
+          message: `Streaming compliance assessment for ${selectedBank}... ⚡`,
+          timestamp: 'Just now'
+        }]);
         
-        const statusResponse = await fetch(`${baseURL}/api/jobs/${jobId}`);
-        const statusData = await statusResponse.json();
+        await api.streamComplianceAssessment(
+          selectedBank,
+          (chunk) => {
+            responseText += chunk;
+            // Show progress
+            setAlerts([{
+              type: 'info',
+              message: `Receiving data... (${responseText.length} chars)`,
+              timestamp: 'Just now'
+            }]);
+          },
+          () => {
+            // Complete
+            console.log('Streaming complete');
+            setAlerts([{
+              type: 'success',
+              message: `Assessment data received for ${selectedBank}`,
+              timestamp: 'Just now'
+            }]);
+          },
+          (error) => {
+            setAlerts([{
+              type: 'error',
+              message: `Streaming failed: ${error}`,
+              timestamp: 'Just now'
+            }]);
+            throw new Error(error);
+          }
+        );
+      } else {
+        // Polling mode (existing)
+        const timestamp = Date.now();
+        const randomId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
         
-        console.log(`Poll attempt ${attempts + 1}:`, statusData.status);
+        const jobResponse = await fetch(`${baseURL}/api/jobs/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inputText: `Use compliance_risk_assessment("${selectedBank}") tool. Return ONLY the raw JSON output with NO explanation. Expected format: {"success": true, "overall_score": X, "scores": {...}, "metrics": {...}, "alerts": [...]}`,
+            sessionId: `compliance-${timestamp}-${randomId}`,
+            jobType: 'chat'
+          })
+        });
         
-        if (statusData.status === 'completed') {
-          const resultResponse = await fetch(`${baseURL}/api/jobs/${jobId}/result`);
-          const resultData = await resultResponse.json();
-          responseText = resultData.result || resultData.response || resultData.output || '';
-          console.log('Compliance response:', responseText);
-          break;
-        } else if (statusData.status === 'failed') {
-          throw { message: 'Job failed' };
+        if (!jobResponse.ok) {
+          throw { message: `HTTP ${jobResponse.status}` };
         }
         
-        attempts++;
-      }
-      
-      if (attempts >= maxAttempts) {
-        throw { message: 'Request timeout' };
+        const jobData = await jobResponse.json();
+        const jobId = jobData.jobId;
+        
+        if (!jobId) {
+          throw { message: 'No job ID returned' };
+        }
+        
+        console.log('Compliance job submitted:', jobId);
+        
+        // Poll for completion
+        let attempts = 0;
+        const maxAttempts = 30;
+        
+        while (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          const statusResponse = await fetch(`${baseURL}/api/jobs/${jobId}`);
+          const statusData = await statusResponse.json();
+          
+          console.log(`Poll attempt ${attempts + 1}:`, statusData.status);
+          
+          if (statusData.status === 'completed') {
+            const resultResponse = await fetch(`${baseURL}/api/jobs/${jobId}/result`);
+            const resultData = await resultResponse.json();
+            responseText = resultData.result || resultData.response || resultData.output || '';
+            console.log('Compliance response:', responseText);
+            break;
+          } else if (statusData.status === 'failed') {
+            throw { message: 'Job failed' };
+          }
+          
+          attempts++;
+        }
+        
+        if (attempts >= maxAttempts) {
+          throw { message: 'Request timeout' };
+        }
       }
       
       if (!responseText) {
@@ -506,6 +603,18 @@ const ComplianceAudit = () => {
                 >
                   {analysisLoading ? 'Analyzing...' : 'AI Analysis'}
                 </Button>
+                <FormControlLabel
+                  control={
+                    <Switch 
+                      checked={useStreaming} 
+                      onChange={(e) => setUseStreaming(e.target.checked)}
+                      disabled={loading || analysisLoading}
+                      size="small"
+                    />
+                  }
+                  label={<Typography variant="caption">Stream {useStreaming ? '⚡' : ''}</Typography>}
+                  sx={{ minWidth: 120 }}
+                />
               </Stack>
             </Box>
           )}

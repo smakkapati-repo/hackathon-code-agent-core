@@ -159,8 +159,8 @@ function FinancialReports() {
       
       console.log('[CHAT] useStreaming:', useStreaming, 'mode:', mode);
       
-      if (useStreaming && mode !== 'local') {
-        // Streaming mode
+      if (useStreaming) {
+        // Streaming mode (works for all modes including local)
         console.log('[CHAT] Using streaming mode');
         await api.streamChat(
           messageToSend,
@@ -303,8 +303,8 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
         inputText = `Generate a comprehensive financial analysis report for ${selectedBank} using available SEC EDGAR data and FDIC tools.${formatRequirements}`;
       }
       
-      if (useStreaming && mode !== 'local') {
-        // Streaming mode for full report
+      if (useStreaming) {
+        // Streaming mode for full report (works for all modes including local)
         setPollingStatus('Generating report (streaming)...');
         let reportText = '';
         

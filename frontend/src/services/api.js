@@ -627,5 +627,141 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
     } catch (error) {
       onError(error.message);
     }
+  },
+
+  // Streaming for peer analytics
+  async streamPeerAnalysis(baseBank, peerBanks, metric, onChunk, onComplete, onError) {
+    console.log('[STREAMING] Starting peer analysis stream');
+    const prompt = `Use the compare_banks tool with these exact parameters:
+- base_bank: "${baseBank}"
+- peer_banks: ["${peerBanks.join('", "')}"]
+- metric: "${metric}"
+
+CRITICAL INSTRUCTIONS:
+1. Call the compare_banks tool
+2. Return the tool's JSON output EXACTLY as-is on the first line
+3. Then provide your expanded analysis below it`;
+
+    // Timeout after 120 seconds (peer analysis needs more time for FDIC data)
+    const timeoutId = setTimeout(() => {
+      onError('Request timeout - please try again or use polling mode');
+    }, 120000);
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/invoke-agent-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inputText: prompt })
+      });
+
+      if (!response.ok) {
+        clearTimeout(timeoutId);
+        onError(`HTTP ${response.status}: ${response.statusText}`);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.chunk) {
+                onChunk(data.chunk);
+              } else if (data.done) {
+                onComplete();
+                return;
+              } else if (data.error) {
+                onError(data.error);
+                return;
+              }
+            } catch (e) {
+              console.error('Parse error:', e);
+            }
+          }
+        }
+      }
+      
+      clearTimeout(timeoutId);
+      onComplete();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      onError(error.message);
+    }
+  },
+
+  // Streaming for compliance assessment
+  async streamComplianceAssessment(bankName, onChunk, onComplete, onError) {
+    console.log('[STREAMING] Starting compliance assessment stream');
+    const prompt = `Use compliance_risk_assessment("${bankName}") tool. Return ONLY the raw JSON output with NO explanation. Expected format: {"success": true, "overall_score": X, "scores": {...}, "metrics": {...}, "alerts": [...]}`;
+
+    // Timeout after 60 seconds
+    const timeoutId = setTimeout(() => {
+      onError('Request timeout - please try again or use polling mode');
+    }, 60000);
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/invoke-agent-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inputText: prompt })
+      });
+
+      if (!response.ok) {
+        clearTimeout(timeoutId);
+        onError(`HTTP ${response.status}: ${response.statusText}`);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.chunk) {
+                onChunk(data.chunk);
+              } else if (data.done) {
+                clearTimeout(timeoutId);
+                onComplete();
+                return;
+              } else if (data.error) {
+                clearTimeout(timeoutId);
+                onError(data.error);
+                return;
+              }
+            } catch (e) {
+              console.error('Parse error:', e);
+            }
+          }
+        }
+      }
+      
+      clearTimeout(timeoutId);
+      onComplete();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      onError(error.message);
+    }
   }
 };
