@@ -255,6 +255,95 @@ app.post('/api/invoke-agent', verifyToken, async (req, res) => {
   return invokeAgent(req, res);
 });
 
+// Streaming agent endpoint
+app.post('/api/invoke-agent-stream', async (req, res) => {
+  const { inputText, sessionId } = req.body;
+
+  if (!inputText) {
+    return res.status(400).json({ error: 'Missing inputText' });
+  }
+
+  logger.info(`Streaming agent invocation: ${inputText.substring(0, 100)}...`);
+
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  try {
+    const agentRuntimeArn = process.env.AGENTCORE_AGENT_ARN;
+    if (!agentRuntimeArn) throw new Error("AGENTCORE_AGENT_ARN not set");
+
+    const region = agentRuntimeArn.split(':')[3] || 'us-east-1';
+    const runtimeSessionId = sessionId || `session-${Date.now()}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}-${Math.random().toString(36).substring(2)}`;
+    const payload = JSON.stringify({ prompt: inputText });
+    const host = `bedrock-agentcore.${region}.amazonaws.com`;
+    const path = `/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations`;
+
+    await new Promise((resolve, reject) => {
+      AWS.config.getCredentials((err) => err ? reject(err) : resolve());
+    });
+
+    const endpoint = new AWS.Endpoint(host);
+    const request = new AWS.HttpRequest(endpoint, region);
+    request.method = 'POST';
+    request.path = path;
+    request.headers['Host'] = host;
+    request.headers['Content-Type'] = 'application/json';
+    request.headers['X-Amzn-Bedrock-AgentCore-Runtime-Session-Id'] = runtimeSessionId;
+    request.body = payload;
+
+    const signer = new AWS.Signers.V4(request, 'bedrock-agentcore');
+    signer.addAuthorization(AWS.config.credentials, new Date());
+
+    const httpsReq = https.request({
+      hostname: host,
+      path: request.path,
+      method: request.method,
+      headers: request.headers
+    }, (httpsRes) => {
+      let buffer = '';
+
+      httpsRes.on('data', (chunk) => {
+        buffer += chunk.toString();
+        
+        // Send chunks to client
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // Keep incomplete line in buffer
+        
+        lines.forEach(line => {
+          if (line.trim()) {
+            res.write(`data: ${JSON.stringify({ chunk: line })}\n\n`);
+          }
+        });
+      });
+
+      httpsRes.on('end', () => {
+        if (buffer.trim()) {
+          res.write(`data: ${JSON.stringify({ chunk: buffer })}\n\n`);
+        }
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.end();
+      });
+    });
+
+    httpsReq.on('error', (err) => {
+      logger.error('Streaming error:', err);
+      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      res.end();
+    });
+
+    httpsReq.write(payload);
+    httpsReq.end();
+
+  } catch (error) {
+    logger.error('Streaming setup error:', error);
+    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    res.end();
+  }
+});
+
 // Simple agent endpoint (for compatibility with AgentService.sendMessage)
 app.post('/api/agent', async (req, res) => {
   const { prompt } = req.body;

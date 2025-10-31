@@ -240,14 +240,41 @@ Your detailed analysis here...`;
     };
   },
 
-  async chatWithAI(question, bankName, reports, useRag, cik) {
-    // Build context-aware prompt
+  async chatWithAI(question, bankName, reports, useRag, cik, useStreaming = false) {
+    if (useStreaming) {
+      // Return promise that resolves when streaming completes
+      return new Promise((resolve, reject) => {
+        let fullResponse = '';
+        
+        this.streamChat(
+          question,
+          bankName,
+          reports,
+          useRag,
+          cik,
+          (chunk) => {
+            fullResponse += chunk;
+          },
+          () => {
+            let cleanResponse = fullResponse;
+            if (cleanResponse.includes('DATA:')) {
+              cleanResponse = cleanResponse.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
+            }
+            resolve({ response: cleanResponse, sources: [] });
+          },
+          (error) => {
+            reject(new Error(error));
+          }
+        );
+      });
+    }
+    
+    // Original polling method
     let prompt = question;
     
     if (bankName) {
       prompt = `${question} about ${bankName}`;
       
-      // Add available reports context if provided
       if (reports && (reports['10-K']?.length > 0 || reports['10-Q']?.length > 0)) {
         const reportsList = [
           ...(reports['10-K'] || []).map(r => `${r.form} filed ${r.filing_date}`),
@@ -261,7 +288,6 @@ Your detailed analysis here...`;
     const job = await this.submitJob(`Use the answer_banking_question tool to answer this question: "${prompt}". Call answer_banking_question with question: "${prompt}" and context: "${bankName || 'General banking question'}".`);
     const result = await this.pollJobUntilComplete(job.jobId);
     
-    // Clean response - remove DATA: lines from chat responses
     let cleanResponse = result.result;
     if (cleanResponse && cleanResponse.includes('DATA:')) {
       cleanResponse = cleanResponse.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
@@ -478,37 +504,62 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
   },
 
   // Streaming method
-  async callAgentStream(inputText, onChunk, onComplete, onError) {
+  async streamChat(question, bankName, reports, useRag, cik, onChunk, onComplete, onError) {
+    let prompt = question;
+    
+    if (bankName) {
+      prompt = `${question} about ${bankName}`;
+      
+      if (reports && (reports['10-K']?.length > 0 || reports['10-Q']?.length > 0)) {
+        const reportsList = [
+          ...(reports['10-K'] || []).map(r => `${r.form} filed ${r.filing_date}`),
+          ...(reports['10-Q'] || []).map(r => `${r.form} filed ${r.filing_date}`)
+        ].slice(0, 5).join(', ');
+        
+        prompt += `. Available SEC filings: ${reportsList}`;
+      }
+    }
+
     try {
       const response = await fetch(`${BACKEND_URL}/api/invoke-agent-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputText })
+        body: JSON.stringify({ inputText: prompt })
       });
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
-            if (data.chunk) {
-              onChunk(data.chunk);
-            } else if (data.done) {
-              onComplete();
-            } else if (data.error) {
-              onError(data.error);
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.chunk) {
+                onChunk(data.chunk);
+              } else if (data.done) {
+                onComplete();
+                return;
+              } else if (data.error) {
+                onError(data.error);
+                return;
+              }
+            } catch (e) {
+              console.error('Parse error:', e);
             }
           }
         }
       }
+      
+      onComplete();
     } catch (error) {
       onError(error.message);
     }

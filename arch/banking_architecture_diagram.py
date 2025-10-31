@@ -10,6 +10,7 @@ from diagrams.aws.security import IAM, Cognito, Shield
 from diagrams.aws.general import User
 from diagrams.onprem.client import Users as ExternalUsers
 from diagrams.onprem.compute import Server
+from diagrams.custom import Custom
 
 # AWS-style professional configuration
 graph_attr = {
@@ -82,11 +83,14 @@ with Diagram(
         # AgentCore Runtime
         with Cluster("Bedrock AgentCore + RAG", graph_attr={"bgcolor": "white", "style": "rounded"}):
             guardrails = Shield("Bedrock Guardrails\nContent Filtering\nTopic Blocking\nPII Protection")
-            agentcore = Bedrock("AgentCore Runtime\nbank_iq_agent\n24 Tools + Memory\nCompliance Analysis")
-            claude = Bedrock("Claude Sonnet 4.5\nConversational AI")
+            agentcore = Bedrock("AgentCore Runtime\nManaged Agent\nMemory + Orchestration")
+            strands_agent = Custom("Strands Agent\n18 Tools (Pydantic)\nFDIC/SEC/RAG/S3", "strands_framework.png")
+            claude = Bedrock("Claude Sonnet 4.5\n200K Context\nTool Selection")
             opensearch = AmazonOpensearchService("OpenSearch Serverless\nVector Store\nRAG Knowledge Base")
             
             guardrails >> agentcore
+            agentcore >> Edge(label="Orchestrate", color="#E91E63") >> strands_agent
+            strands_agent >> Edge(label="LLM Reasoning", color="#E91E63") >> claude
             
         # CI/CD Pipeline
         with Cluster("CI/CD Pipeline", graph_attr={"bgcolor": "white", "style": "rounded"}):
@@ -102,10 +106,10 @@ with Diagram(
     
     # Step 1: User Authentication
     users >> Edge(label="1a. Login/Signup", color="#FF9900", style="bold") >> cognito
-    cognito >> Edge(label="1b. JWT Token", color="#FF9900", style="dashed") >> users
+    cognito >> Edge(taillabel="1b. JWT Token", color="#FF9900", style="dashed", minlen="1") >> users
     
     # Step 2: User to CloudFront
-    users >> Edge(label="2. HTTPS Request\n+ JWT Token", color="#FF9900", style="bold") >> cloudfront
+    users >> Edge(headlabel="2. HTTPS Request\n+ JWT Token", color="#FF9900", style="bold") >> cloudfront
     
     # Step 3: CloudFront to S3 (static files)
     cloudfront >> Edge(label="3a. Static Files\n(/, /static/*)", color="#4CAF50") >> s3_frontend
@@ -123,11 +127,8 @@ with Diagram(
     # Step 6: Backend to Guardrails
     ecs_backend >> Edge(label="6a. Content Check", color="#FF5722", style="dashed") >> guardrails
     
-    # Step 7: AgentCore to Claude
-    agentcore >> Edge(label="6b. AI Analysis\nBank Performance\nCompliance Scoring", color="#E91E63") >> claude
-    
-    # Step 7b: AgentCore to OpenSearch (RAG)
-    agentcore >> Edge(label="RAG Query\nVector Search", color="#E91E63", style="dashed") >> opensearch
+    # Step 7: Strands Agent to OpenSearch (RAG)
+    strands_agent >> Edge(label="RAG Query\nVector Search", color="#E91E63", style="dashed") >> opensearch
     
     # Step 8: Document Storage
     ecs_backend >> Edge(label="7. Upload Docs", color="#FF9800") >> s3_docs

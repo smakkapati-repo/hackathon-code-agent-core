@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Box, Typography, Card, CardContent, Grid, Button,
   TextField, Paper, Chip, List, ListItem, ListItemText,
-  CircularProgress, Alert, Dialog, DialogTitle, DialogContent, DialogActions
+  CircularProgress, Alert, Dialog, DialogTitle, DialogContent, DialogActions,
+  Switch, FormControlLabel
 } from '@mui/material';
 import ChatIcon from '@mui/icons-material/Chat';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -41,6 +42,7 @@ function FinancialReports() {
   const [ragBanks, setRagBanks] = useState([]);
   const [loadingRagBanks, setLoadingRagBanks] = useState(false);
   const pollingRef = useRef(null);
+  const [useStreaming, setUseStreaming] = usePersistedState('reports_useStreaming', false);
 
   // Fallback popular banks with CIKs for search/selection
   const popularBanks = {
@@ -140,50 +142,86 @@ function FinancialReports() {
       setChatLoading(true);
       
       // Add empty assistant message
+      const assistantIndex = chatHistory.length + 1;
       setChatHistory(prev => [...prev, { 
         role: 'assistant', 
         content: '',
         sources: []
       }]);
       
-      let response;
-      if (mode === 'local') {
-        response = await api.chatWithLocalFiles(messageToSend, analyzedDocs);
+      if (useStreaming && mode !== 'local') {
+        // Streaming mode
+        await api.streamChat(
+          messageToSend,
+          selectedBank,
+          reports,
+          mode === 'rag',
+          selectedBankCik,
+          (chunk) => {
+            // Update assistant message with accumulated chunks
+            setChatHistory(prev => {
+              const newHistory = [...prev];
+              const lastIndex = newHistory.length - 1;
+              if (newHistory[lastIndex]?.role === 'assistant') {
+                newHistory[lastIndex].content += chunk;
+              }
+              return newHistory;
+            });
+          },
+          () => {
+            // Streaming complete
+            setChatLoading(false);
+          },
+          (error) => {
+            // Streaming error
+            console.error('Streaming error:', error);
+            setChatHistory(prev => {
+              const newHistory = [...prev];
+              const lastIndex = newHistory.length - 1;
+              if (newHistory[lastIndex]?.role === 'assistant') {
+                newHistory[lastIndex].content = `Error: ${error}`;
+              }
+              return newHistory;
+            });
+            setChatLoading(false);
+          }
+        );
       } else {
-        // Pass mode to agent - it will decide which tool to use
-        response = await api.chatWithAI(messageToSend, selectedBank, reports, mode, selectedBankCik);
-      }
-      setChatHistory(prev => {
-        const newHistory = [...prev];
-        const lastIndex = newHistory.length - 1;
-        if (newHistory[lastIndex] && newHistory[lastIndex].role === 'assistant') {
-          // Remove DATA: line from chat display (it's for parsing only)
-          let cleanContent = response.response;
-          if (cleanContent.includes('DATA:')) {
-            cleanContent = cleanContent.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
-          }
-          // Remove duplicate "AI:" prefix if present
-          if (cleanContent.startsWith('AI:')) {
-            cleanContent = cleanContent.substring(3).trim();
-          }
-          newHistory[lastIndex].content = cleanContent;
-          newHistory[lastIndex].sources = response.sources || [];
+        // Polling mode (original)
+        let response;
+        if (mode === 'local') {
+          response = await api.chatWithLocalFiles(messageToSend, analyzedDocs);
+        } else {
+          response = await api.chatWithAI(messageToSend, selectedBank, reports, mode, selectedBankCik, false);
         }
-        return newHistory;
-      });
-      
-
+        
+        setChatHistory(prev => {
+          const newHistory = [...prev];
+          const lastIndex = newHistory.length - 1;
+          if (newHistory[lastIndex]?.role === 'assistant') {
+            let cleanContent = response.response;
+            if (cleanContent.includes('DATA:')) {
+              cleanContent = cleanContent.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
+            }
+            if (cleanContent.startsWith('AI:')) {
+              cleanContent = cleanContent.substring(3).trim();
+            }
+            newHistory[lastIndex].content = cleanContent;
+            newHistory[lastIndex].sources = response.sources || [];
+          }
+          return newHistory;
+        });
+        setChatLoading(false);
+      }
       
     } catch (err) {
       console.error('Chat error:', err);
-      // Update the existing empty assistant message with error instead of adding new one
       setChatHistory(prev => {
         const newHistory = [...prev];
         const lastIndex = newHistory.length - 1;
-        if (newHistory[lastIndex] && newHistory[lastIndex].role === 'assistant') {
+        if (newHistory[lastIndex]?.role === 'assistant') {
           newHistory[lastIndex].content = `Error: ${err.message || 'Failed to get AI response'}`;
         } else {
-          // Fallback: add new error message if no empty message exists
           newHistory.push({ 
             role: 'assistant', 
             content: `Error: ${err.message || 'Failed to get AI response'}` 
@@ -191,7 +229,6 @@ function FinancialReports() {
         }
         return newHistory;
       });
-    } finally {
       setChatLoading(false);
     }
   };
@@ -807,10 +844,24 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
           <Grid item xs={12} md={6}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-                  <ChatIcon sx={{ mr: 1 }} />
-                  AI Chat Interface
-                </Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+                    <ChatIcon sx={{ mr: 1 }} />
+                    AI Chat Interface
+                  </Typography>
+                  {mode !== 'local' && (
+                    <FormControlLabel
+                      control={
+                        <Switch 
+                          checked={useStreaming} 
+                          onChange={(e) => setUseStreaming(e.target.checked)}
+                          size="small"
+                        />
+                      }
+                      label={<Typography variant="caption">Stream {useStreaming ? '⚡' : ''}</Typography>}
+                    />
+                  )}
+                </Box>
                 
                 {/* Chat History */}
                 <Paper 
