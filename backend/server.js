@@ -306,35 +306,55 @@ app.post('/api/invoke-agent-stream', async (req, res) => {
       let buffer = '';
 
       httpsRes.on('data', (chunk) => {
-        buffer += chunk.toString();
+        const data = chunk.toString();
+        buffer += data;
+        
+        // Try to parse and stream each complete JSON object
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              const event = JSON.parse(line);
+              // Extract text from streaming event
+              if (event.content && Array.isArray(event.content)) {
+                for (const item of event.content) {
+                  if (item.text) {
+                    res.write(`data: ${JSON.stringify({ chunk: item.text })}\n\n`);
+                  }
+                }
+              } else if (event.text) {
+                res.write(`data: ${JSON.stringify({ chunk: event.text })}\n\n`);
+              }
+            } catch (e) {
+              // Not JSON, might be plain text
+              if (line.trim()) {
+                res.write(`data: ${JSON.stringify({ chunk: line })}\n\n`);
+              }
+            }
+          }
+        }
       });
 
       httpsRes.on('end', () => {
-        try {
-          const result = JSON.parse(buffer);
-          let output = '';
-          
-          if (result.content && Array.isArray(result.content) && result.content[0]?.text) {
-            output = result.content[0].text;
-          } else if (result.output) {
-            output = result.output;
-          } else if (result.response) {
-            output = result.response;
-          } else if (typeof result === 'string') {
-            output = result;
-          } else {
-            output = result.text || JSON.stringify(result);
+        // Handle any remaining buffer
+        if (buffer.trim()) {
+          try {
+            const event = JSON.parse(buffer);
+            if (event.content && Array.isArray(event.content)) {
+              for (const item of event.content) {
+                if (item.text) {
+                  res.write(`data: ${JSON.stringify({ chunk: item.text })}\n\n`);
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore parse errors on final buffer
           }
-          
-          // Send complete response immediately
-          res.write(`data: ${JSON.stringify({ chunk: output })}\n\n`);
-          res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-          res.end();
-        } catch (e) {
-          logger.error('Streaming parse error:', e);
-          res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
-          res.end();
         }
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.end();
       });
     });
 

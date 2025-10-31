@@ -1488,10 +1488,12 @@ COMPLIANCE_DATA: {"success": true, "overall_score": 87, "scores": {...}, "metric
 Be professional and business-focused. For chat and reports, provide ONLY clean text analysis with NO JSON data (EXCEPT for compliance_risk_assessment which MUST include the COMPLIANCE_DATA: JSON line first)."""
 
 @app.entrypoint
-def invoke(payload):
-    """AgentCore entrypoint"""
+async def invoke(payload):
+    """AgentCore entrypoint with streaming support"""
     user_message = payload.get("prompt", "Hello! I'm BankIQ+, your banking analyst.")
-    return agent(user_message)
+    stream = agent.stream_async(user_message)
+    async for event in stream:
+        yield event
 
 if __name__ == "__main__":
     app.run()
