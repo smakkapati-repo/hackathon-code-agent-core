@@ -112,18 +112,15 @@ if [ -n "$CLOUDFRONT_DIST" ]; then
   fi
 fi
 
-# Step 2: Delete ECR repositories
-if [ -n "$BACKEND_ECR" ]; then
-  echo -e "${YELLOW}🗑️  Deleting backend ECR repository: $BACKEND_ECR${NC}"
-  aws ecr delete-repository --repository-name $BACKEND_ECR --region $REGION --force 2>/dev/null || true
-  echo "✅ Backend ECR repository deleted"
-fi
-
-if [ -n "$AGENT_ECR" ]; then
-  echo -e "${YELLOW}🗑️  Deleting agent ECR repository: $AGENT_ECR${NC}"
-  aws ecr delete-repository --repository-name $AGENT_ECR --region $REGION --force 2>/dev/null || true
-  echo "✅ Agent ECR repository deleted"
-fi
+# Step 2: Delete ECR repositories (force delete all bankiq and agentcore repos)
+echo -e "${YELLOW}🗑️  Deleting ECR repositories...${NC}"
+for REPO in $(aws ecr describe-repositories --region $REGION --query "repositories[].repositoryName" --output text 2>/dev/null); do
+  if [[ "$REPO" == *"bankiq"* ]] || [[ "$REPO" == *"bedrock-agentcore"* ]]; then
+    echo "Deleting ECR repo: $REPO"
+    aws ecr delete-repository --repository-name $REPO --region $REGION --force 2>/dev/null || true
+  fi
+done
+echo "✅ ECR repositories deleted"
 
 # Step 2.5: Delete RAG Knowledge Base (all bankiq KBs)
 echo -e "${YELLOW}🗑️  Deleting RAG Knowledge Base...${NC}"
@@ -202,11 +199,13 @@ else
   echo "⚠️  agentcore CLI not found, skipping agent deletion"
 fi
 
-# Delete AgentCore ECR repository explicitly
-echo -e "${YELLOW}🗑️  Deleting AgentCore ECR repository...${NC}"
-AGENTCORE_ECR="bedrock-agentcore-bank_iq_agent_v1"
-aws ecr delete-repository --repository-name $AGENTCORE_ECR --region $REGION --force 2>/dev/null || echo "⚠️  AgentCore ECR repository may not exist"
-echo "✅ AgentCore ECR repository deletion attempted"
+# Delete AgentCore ECR repository explicitly (all variations)
+echo -e "${YELLOW}🗑️  Deleting AgentCore ECR repositories...${NC}"
+for AGENTCORE_ECR in "bedrock-agentcore-bank_iq_agent_v1" "bedrock-agentcore-bank_iq_agent"; do
+  aws ecr delete-repository --repository-name $AGENTCORE_ECR --region $REGION --force 2>/dev/null && \
+    echo "✅ Deleted $AGENTCORE_ECR" || \
+    echo "⚠️  $AGENTCORE_ECR may not exist"
+done
 
 # Fallback: Find and delete any remaining ECR repositories with stack name or variations
 echo -e "${YELLOW}🔍 Checking for any remaining ${STACK_NAME} ECR repositories...${NC}"
