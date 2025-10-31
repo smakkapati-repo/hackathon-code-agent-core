@@ -307,24 +307,38 @@ app.post('/api/invoke-agent-stream', async (req, res) => {
 
       httpsRes.on('data', (chunk) => {
         buffer += chunk.toString();
-        
-        // Send chunks to client
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // Keep incomplete line in buffer
-        
-        lines.forEach(line => {
-          if (line.trim()) {
-            res.write(`data: ${JSON.stringify({ chunk: line })}\n\n`);
-          }
-        });
       });
 
       httpsRes.on('end', () => {
-        if (buffer.trim()) {
-          res.write(`data: ${JSON.stringify({ chunk: buffer })}\n\n`);
+        try {
+          const result = JSON.parse(buffer);
+          let output = '';
+          
+          if (result.content && Array.isArray(result.content) && result.content[0]?.text) {
+            output = result.content[0].text;
+          } else if (result.output) {
+            output = result.output;
+          } else if (result.response) {
+            output = result.response;
+          } else if (typeof result === 'string') {
+            output = result;
+          } else {
+            output = result.text || JSON.stringify(result);
+          }
+          
+          // Stream output word by word
+          const words = output.split(' ');
+          words.forEach((word, i) => {
+            res.write(`data: ${JSON.stringify({ chunk: word + (i < words.length - 1 ? ' ' : '') })}\n\n`);
+          });
+          
+          res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+          res.end();
+        } catch (e) {
+          logger.error('Streaming parse error:', e);
+          res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+          res.end();
         }
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        res.end();
       });
     });
 
