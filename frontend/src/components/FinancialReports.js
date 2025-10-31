@@ -12,27 +12,35 @@ import CloudIcon from '@mui/icons-material/Cloud';
 import SearchIcon from '@mui/icons-material/Search';
 import { api } from '../services/api';
 import ReactMarkdown from 'react-markdown';
-import { usePersistedState } from '../hooks/usePersistedState';
+
+// Decode HTML entities
+const decodeHtmlEntities = (text) => {
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  return textarea.value;
+};
 
 function FinancialReports() {
-  const [selectedBank, setSelectedBank] = usePersistedState('reports_selectedBank', '');
+  // Clean slate - no persistence
+  const [selectedBank, setSelectedBank] = useState('');
   const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = usePersistedState('reports_chatHistory', []);
-  const [reports, setReports] = usePersistedState('reports_reports', { '10-K': [], '10-Q': [] });
+  const [chatHistory, setChatHistory] = useState([]);
+  const [reports, setReports] = useState({ '10-K': [], '10-Q': [] });
   const [loading, setLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [error, setError] = useState('');
-  const [fullReport, setFullReport] = usePersistedState('reports_fullReport', '');
+  const [fullReport, setFullReport] = useState('');
   const [reportLoading, setReportLoading] = useState(false);
   const [pollingStatus, setPollingStatus] = useState('');
-  const [mode, setMode] = usePersistedState('reports_mode', 'live');
+  const [mode, setMode] = useState('live');
   const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [analyzedDocs, setAnalyzedDocs] = usePersistedState('reports_analyzedDocs', []);
+  const [analyzedDocs, setAnalyzedDocs] = useState([]);
+  // Streaming is now the default for better UX
   const [searchBank, setSearchBank] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [selectedBankCik, setSelectedBankCik] = usePersistedState('reports_selectedBankCik', null);
+  const [selectedBankCik, setSelectedBankCik] = useState(null);
   const [ragAvailable, setRagAvailable] = useState(false);
   const [showAddBankDialog, setShowAddBankDialog] = useState(false);
   const [addBankSearch, setAddBankSearch] = useState('');
@@ -42,7 +50,7 @@ function FinancialReports() {
   const [ragBanks, setRagBanks] = useState([]);
   const [loadingRagBanks, setLoadingRagBanks] = useState(false);
   const pollingRef = useRef(null);
-  const [useStreaming, setUseStreaming] = usePersistedState('reports_useStreaming', false);
+  const [useStreaming, setUseStreaming] = useState(true); // Default to streaming for better UX
 
   // Fallback popular banks with CIKs for search/selection
   const popularBanks = {
@@ -172,7 +180,31 @@ function FinancialReports() {
             });
           },
           () => {
-            // Streaming complete
+            // Streaming complete - clean up DATA: lines and tool messages
+            setChatHistory(prev => {
+              const newHistory = [...prev];
+              const lastIndex = newHistory.length - 1;
+              if (newHistory[lastIndex]?.role === 'assistant') {
+                let content = newHistory[lastIndex].content;
+                
+                // Remove DATA: and COMPLIANCE_DATA: lines completely
+                const lines = content.split('\n');
+                content = lines.filter(line => {
+                  const trimmed = line.trim();
+                  return !trimmed.startsWith('DATA:') && !trimmed.startsWith('COMPLIANCE_DATA:');
+                }).join('\n');
+                
+                // Remove "I don't have access to..." preambles
+                content = content.replace(/^I don't have access to (?:a |an |the )?[\w_]+.*?(?:tool|function).*?(?:\.|However,|But)\s*/i, '');
+                
+                // Remove "Let me gather/get..." lines
+                content = content.replace(/^Let me (?:gather|get|fetch).*?:\s*/gm, '');
+                content = content.replace(/^Now let me (?:gather|get|fetch).*?:\s*/gm, '');
+                
+                newHistory[lastIndex].content = content.trim();
+              }
+              return newHistory;
+            });
             setChatLoading(false);
           },
           (error) => {
@@ -203,8 +235,12 @@ function FinancialReports() {
           const lastIndex = newHistory.length - 1;
           if (newHistory[lastIndex]?.role === 'assistant') {
             let cleanContent = response.response;
-            if (cleanContent.includes('DATA:')) {
-              cleanContent = cleanContent.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
+            if (cleanContent.includes('DATA:') || cleanContent.includes('COMPLIANCE_DATA:')) {
+              const lines = cleanContent.split('\n');
+              cleanContent = lines.filter(line => {
+                const trimmed = line.trim();
+                return !trimmed.startsWith('DATA:') && !trimmed.startsWith('COMPLIANCE_DATA:');
+              }).join('\n').trim();
             }
             if (cleanContent.startsWith('AI:')) {
               cleanContent = cleanContent.substring(3).trim();
@@ -262,13 +298,9 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
           inputText = `Generate a comprehensive financial analysis report for ${selectedBank} based on their ${doc.form_type} filing for fiscal year ${doc.year}.${formatRequirements}`;
         }
       } else if (mode === 'rag') {
-        inputText = `IMPORTANT: You MUST use the generate_rag_indexed_report tool.
-
-Call generate_rag_indexed_report(bank_name="${selectedBank}")${formatRequirements}`;
+        inputText = `Generate a comprehensive financial analysis report for ${selectedBank} using the RAG knowledge base and available tools.${formatRequirements}`;
       } else {
-        inputText = `IMPORTANT: You MUST use the generate_live_sec_report tool.
-
-Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, cik="${selectedBankCik}"` : ''})${formatRequirements}`;
+        inputText = `Generate a comprehensive financial analysis report for ${selectedBank} using available SEC EDGAR data and FDIC tools.${formatRequirements}`;
       }
       
       if (useStreaming && mode !== 'local') {
@@ -320,7 +352,9 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
             
             let cleanReport = result.result;
             if (cleanReport.includes('DATA:')) {
-              cleanReport = cleanReport.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
+              // Remove DATA: line - find the line starting with DATA: and remove it
+              const lines = cleanReport.split('\n');
+              cleanReport = lines.filter(line => !line.trim().startsWith('DATA:')).join('\n').trim();
             }
             
             localStorage.setItem('completedReport', cleanReport);
@@ -924,7 +958,7 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
                           '& strong': { fontWeight: 600, color: '#A020F0' },
                           '& code': { backgroundColor: '#f5f5f5', padding: '2px 4px', borderRadius: '3px', fontSize: '0.9em' }
                         }}>
-                          <ReactMarkdown>{message.content}</ReactMarkdown>
+                          <ReactMarkdown>{decodeHtmlEntities(message.content)}</ReactMarkdown>
                         </Box>
                         {message.sources && message.sources.length > 0 && (
                           <Box sx={{ mt: 1 }}>
@@ -1056,7 +1090,7 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
                 '& em': { fontStyle: 'italic', color: '#666' },
                 '& blockquote': { borderLeft: '4px solid #A020F0', pl: 2, ml: 0, fontStyle: 'italic', color: '#666' }
               }}>
-                <ReactMarkdown>{fullReport}</ReactMarkdown>
+                <ReactMarkdown>{decodeHtmlEntities(fullReport)}</ReactMarkdown>
               </Box>
             </Paper>
           </CardContent>

@@ -168,6 +168,8 @@ function App() {
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
+    // Note: State is NOT reset on tab change - each tab maintains its own state
+    // If you want a clean slate, the user can refresh the page
   };
 
   if (loading) {

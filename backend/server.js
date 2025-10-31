@@ -238,7 +238,7 @@ app.post('/api/chat', async (req, res) => {
     });
 
     // Return jobId immediately for client-side polling
-    return res.json({ 
+    return res.json({
       jobId,
       status: JOB_STATUS.PENDING,
       message: 'Job submitted successfully'
@@ -263,12 +263,12 @@ app.post('/api/invoke-agent-stream', async (req, res) => {
     return res.status(400).json({ error: 'Missing inputText' });
   }
 
-  logger.info(`Streaming agent invocation: ${inputText.substring(0, 100)}...`);
+  logger.info(`Streaming: ${inputText.substring(0, 50)}`);
 
-  // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   try {
@@ -304,63 +304,85 @@ app.post('/api/invoke-agent-stream', async (req, res) => {
       headers: request.headers
     }, (httpsRes) => {
       let buffer = '';
+      let eventData = '';
 
       httpsRes.on('data', (chunk) => {
-        const data = chunk.toString();
-        buffer += data;
-        
-        // Try to parse and stream each complete JSON object
+        buffer += chunk.toString();
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-        
+
         for (const line of lines) {
-          if (line.trim()) {
-            try {
-              const event = JSON.parse(line);
-              // Extract text from streaming event
-              if (event.content && Array.isArray(event.content)) {
-                for (const item of event.content) {
-                  if (item.text) {
-                    res.write(`data: ${JSON.stringify({ chunk: item.text })}\n\n`);
-                  }
+          const trimmed = line.trim();
+
+          if (!trimmed) {
+            // Empty line = end of SSE event
+            if (eventData) {
+              try {
+                const event = JSON.parse(eventData);
+                let text = '';
+
+                // Extract text from various AgentCore formats
+                if (event.delta?.text) {
+                  // AgentCore Strands format (most common)
+                  text = event.delta.text;
+                } else if (event.data && typeof event.data === 'string') {
+                  text = event.data;
+                } else if (event.chunk?.bytes) {
+                  text = Buffer.from(event.chunk.bytes, 'base64').toString('utf-8');
+                } else if (event.bytes) {
+                  text = Buffer.from(event.bytes, 'base64').toString('utf-8');
+                } else if (event.contentBlockDelta?.delta?.text) {
+                  text = event.contentBlockDelta.delta.text;
+                } else if (event.text) {
+                  text = event.text;
+                } else if (event.event?.contentBlockDelta?.delta?.text) {
+                  text = event.event.contentBlockDelta.delta.text;
                 }
-              } else if (event.text) {
-                res.write(`data: ${JSON.stringify({ chunk: event.text })}\n\n`);
+
+                if (text) {
+                  res.write(`data: {"chunk":${JSON.stringify(text)}}\n\n`);
+                }
+              } catch (e) {
+                logger.debug('Streaming parse error:', e.message);
               }
-            } catch (e) {
-              // Not JSON, might be plain text
-              if (line.trim()) {
-                res.write(`data: ${JSON.stringify({ chunk: line })}\n\n`);
-              }
+              eventData = '';
             }
+          } else if (trimmed.startsWith('data:')) {
+            eventData = trimmed.substring(5).trim();
+          } else if (!trimmed.startsWith(':')) {
+            eventData += trimmed;
           }
         }
       });
 
       httpsRes.on('end', () => {
-        // Handle any remaining buffer
-        if (buffer.trim()) {
+        // Process any remaining event
+        if (eventData) {
           try {
-            const event = JSON.parse(buffer);
-            if (event.content && Array.isArray(event.content)) {
-              for (const item of event.content) {
-                if (item.text) {
-                  res.write(`data: ${JSON.stringify({ chunk: item.text })}\n\n`);
-                }
-              }
+            const event = JSON.parse(eventData);
+            let text = '';
+            if (event.delta?.text) {
+              text = event.delta.text;
+            } else if (event.data && typeof event.data === 'string') {
+              text = event.data;
+            } else if (event.chunk?.bytes) {
+              text = Buffer.from(event.chunk.bytes, 'base64').toString('utf-8');
+            } else if (event.text) {
+              text = event.text;
             }
-          } catch (e) {
-            // Ignore parse errors on final buffer
-          }
+            if (text) {
+              res.write(`data: {"chunk":${JSON.stringify(text)}}\n\n`);
+            }
+          } catch (e) { }
         }
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+
+        res.write(`data: {"done":true}\n\n`);
         res.end();
       });
     });
 
     httpsReq.on('error', (err) => {
-      logger.error('Streaming error:', err);
-      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      res.write(`data: {"error":${JSON.stringify(err.message)}}\n\n`);
       res.end();
     });
 
@@ -368,8 +390,8 @@ app.post('/api/invoke-agent-stream', async (req, res) => {
     httpsReq.end();
 
   } catch (error) {
-    logger.error('Streaming setup error:', error);
-    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    logger.error('Streaming error:', error);
+    res.write(`data: {"error":${JSON.stringify(error.message)}}\n\n`);
     res.end();
   }
 });
@@ -377,11 +399,11 @@ app.post('/api/invoke-agent-stream', async (req, res) => {
 // Simple agent endpoint (for compatibility with AgentService.sendMessage)
 app.post('/api/agent', async (req, res) => {
   const { prompt } = req.body;
-  
+
   if (!prompt) {
     return res.status(400).json({ error: 'Missing prompt' });
   }
-  
+
   // Convert to the expected format and call invokeAgent
   req.body = { inputText: prompt };
   return invokeAgent(req, res);
@@ -640,7 +662,7 @@ Use professional banking terminology and provide quantitative insights with spec
     });
 
     const result = JSON.parse(response.body);
-    
+
     // AgentCore returns: { role: "assistant", content: [{ text: "..." }] }
     let output = 'No response';
     if (result.role === 'assistant' && result.content && Array.isArray(result.content)) {
@@ -793,14 +815,14 @@ app.post('/api/upload-pdf', async (req, res) => {
         console.log(`[${new Date().toISOString()}] ✅ Uploaded and verified: ${s3Key}`);
       } catch (s3Error) {
         console.error(`[${new Date().toISOString()}] ❌ S3 upload failed:`, s3Error.message);
-        return res.status(500).json({ 
+        return res.status(500).json({
           error: `S3 upload failed: ${s3Error.message}. Chat functionality requires S3 storage.`,
           details: 'Check UPLOADED_DOCS_BUCKET environment variable and IAM permissions'
         });
       }
-      
+
       if (!s3Key) {
-        return res.status(500).json({ 
+        return res.status(500).json({
           error: 'Failed to upload document to S3. Chat functionality requires S3 storage.'
         });
       }
@@ -1293,28 +1315,113 @@ async function processJob(jobId) {
       req.end();
     });
 
-    // Parse response
-    const result = JSON.parse(response.body);
-    
-    // AgentCore returns: { role: "assistant", content: [{ text: "..." }] }
-    let output = 'No response';
-    if (result.role === 'assistant' && result.content && Array.isArray(result.content)) {
-      // Extract text from content array
-      const textParts = result.content.filter(c => c.text).map(c => c.text);
-      output = textParts.join('\n');
-    } else if (result.content && Array.isArray(result.content) && result.content[0]?.text) {
-      output = result.content[0].text;
-    } else if (result.output) {
-      output = result.output;
-    } else if (result.response) {
-      output = result.response;
-    } else if (result.message) {
-      output = result.message;
-    } else if (typeof result === 'string') {
-      output = result;
-    } else {
-      output = result.analysis || result.text || JSON.stringify(result);
+    // Parse AgentCore event-stream response
+    // AgentCore returns SSE format: "data: {...}\n\ndata: {...}\n\n"
+    let output = '';
+
+    console.log(`[${new Date().toISOString()}] [INFO] Job ${jobId} - Response length: ${response.body.length} bytes`);
+    console.log(`[${new Date().toISOString()}] [INFO] Job ${jobId} - First 300 chars: ${response.body.substring(0, 300)}`);
+
+    // Parse Server-Sent Events (SSE) format
+    const lines = response.body.split('\n');
+    let eventData = '';
+    let eventCount = 0;
+    const eventTypes = new Set();
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        // Empty line marks end of event
+        if (eventData) {
+          try {
+            const event = JSON.parse(eventData);
+            eventCount++;
+            
+            // Track event types
+            const eventType = Object.keys(event).join(',');
+            if (!eventTypes.has(eventType) && eventTypes.size < 10) {
+              eventTypes.add(eventType);
+              console.log(`[${new Date().toISOString()}] [INFO] Job ${jobId} - Event type: ${eventType} = ${JSON.stringify(event).substring(0, 300)}`);
+            }
+
+            // Extract text from various AgentCore event structures
+            if (event.delta?.text) {
+              // AgentCore Strands format: {"delta": {"text": "..."}, "data": "..."}
+              output += event.delta.text;
+            } else if (event.data && typeof event.data === 'string') {
+              // Direct data field
+              output += event.data;
+            } else if (event.chunk?.bytes) {
+              output += Buffer.from(event.chunk.bytes, 'base64').toString('utf-8');
+            } else if (event.bytes) {
+              output += Buffer.from(event.bytes, 'base64').toString('utf-8');
+            } else if (event.contentBlockDelta?.delta?.text) {
+              output += event.contentBlockDelta.delta.text;
+            } else if (event.text) {
+              output += event.text;
+            } else if (event.completion) {
+              output += event.completion;
+            } else if (event.event?.contentBlockDelta?.delta?.text) {
+              // Bedrock format
+              output += event.event.contentBlockDelta.delta.text;
+            }
+          } catch (e) {
+            console.log(`[${new Date().toISOString()}] [DEBUG] Job ${jobId} - Parse error: ${e.message}`);
+          }
+          eventData = '';
+        }
+        continue;
+      }
+
+      // Handle SSE "data:" prefix
+      if (trimmed.startsWith('data:')) {
+        eventData = trimmed.substring(5).trim();
+      } else if (trimmed.startsWith(':')) {
+        // SSE comment, skip
+        continue;
+      } else {
+        eventData += trimmed;
+      }
     }
+
+    // Process final event
+    if (eventData) {
+      try {
+        const event = JSON.parse(eventData);
+        if (event.chunk?.bytes) {
+          output += Buffer.from(event.chunk.bytes, 'base64').toString('utf-8');
+        } else if (event.text) {
+          output += event.text;
+        }
+      } catch (e) {
+        logger.debug(`Job ${jobId} - Final event parse error: ${e.message}`);
+      }
+    }
+
+    // Fallback: try single JSON parse
+    if (!output) {
+      logger.info(`Job ${jobId} - No SSE output, trying single JSON...`);
+      try {
+        const result = JSON.parse(response.body);
+        if (result.role === 'assistant' && result.content && Array.isArray(result.content)) {
+          output = result.content.filter(c => c.text).map(c => c.text).join('\n');
+        } else if (result.content?.[0]?.text) {
+          output = result.content[0].text;
+        } else if (result.output || result.completion) {
+          output = result.output || result.completion;
+        }
+      } catch (e) {
+        logger.error(`Job ${jobId} - JSON parse failed: ${e.message}`);
+      }
+    }
+
+    if (!output) {
+      logger.error(`Job ${jobId} - No output! Raw (1000 chars): ${response.body.substring(0, 1000)}`);
+      throw new Error(`No valid response from AgentCore`);
+    }
+
+    logger.info(`Job ${jobId} - Extracted ${output.length} chars`);
 
     // Update job with result
     job.status = JOB_STATUS.COMPLETED;
@@ -1464,9 +1571,9 @@ app.get('/api/rag/banks', async (req, res) => {
 app.get('/api/rag/status', (req, res) => {
   const kbId = process.env.KNOWLEDGE_BASE_ID;
   const available = !!(kbId && kbId.trim() !== '');
-  
+
   logger.debug(`RAG status check: ${available ? 'Available' : 'Not available'} (KB ID: ${kbId || 'not set'})`);
-  
+
   res.json({
     available,
     kbId: available ? kbId : null,
@@ -1485,7 +1592,7 @@ app.listen(PORT, () => {
   console.log(`   Bank Search: http://localhost:${PORT}/api/search-banks`);
   console.log(`   RAG Query: http://localhost:${PORT}/api/rag/query`);
   console.log(`   RAG Status: http://localhost:${PORT}/api/rag/status`);
-  
+
   // Log RAG status on startup
   const kbId = process.env.KNOWLEDGE_BASE_ID;
   if (kbId && kbId.trim() !== '') {
@@ -1501,23 +1608,23 @@ app.listen(PORT, () => {
 app.post('/api/get-rag-filings', async (req, res) => {
   const { bankName } = req.body;
   if (!bankName) return res.status(400).json({ error: 'Missing bankName' });
-  
+
   try {
     const s3BucketName = process.env.SEC_FILINGS_BUCKET || 'bankiq-sec-filings-164543933824-prod';
     const AWS = require('aws-sdk');
     const s3 = new AWS.S3({ region: process.env.AWS_REGION || 'us-east-1' });
-    
+
     // First, list all folders in S3 to find exact match
     const foldersResponse = await s3.listObjectsV2({
       Bucket: s3BucketName,
       Delimiter: '/'
     }).promise();
-    
+
     const availableFolders = (foldersResponse.CommonPrefixes || [])
       .map(prefix => prefix.Prefix.replace('/', ''));
-    
+
     logger.debug(`Available S3 folders: ${availableFolders.join(', ')}`);
-    
+
     // Try to match bank name to folder (case-insensitive, flexible matching)
     const normalizedBankName = bankName.toUpperCase()
       .replace(/ & /g, '-')
@@ -1528,7 +1635,7 @@ app.post('/api/get-rag-filings', async (req, res) => {
       .replace(/ FINANCIAL$/g, '')
       .replace(/ /g, '-')
       .replace(/\./g, '');
-    
+
     // Find best matching folder
     let bankFolder = availableFolders.find(folder => {
       const folderNormalized = folder.toUpperCase();
@@ -1542,26 +1649,26 @@ app.post('/api/get-rag-filings', async (req, res) => {
       if (folderNormalized.includes(firstTwoWords)) return true;
       return false;
     });
-    
+
     if (!bankFolder) {
       logger.warn(`No S3 folder found for bank: ${bankName}. Tried: ${normalizedBankName}`);
-      return res.json({ 
-        success: false, 
+      return res.json({
+        success: false,
         error: `Bank "${bankName}" not found in RAG index. Available banks: ${availableFolders.join(', ')}`,
-        '10-K': [], 
-        '10-Q': [] 
+        '10-K': [],
+        '10-Q': []
       });
     }
-    
+
     logger.info(`Matched "${bankName}" to S3 folder: ${bankFolder}`);
-    
+
     const response = await s3.listObjectsV2({
       Bucket: s3BucketName,
       Prefix: `${bankFolder}/`
     }).promise();
-    
+
     const tenK = [], tenQ = [];
-    
+
     (response.Contents || []).forEach(obj => {
       const key = obj.Key;
       if (key.includes('/10-K/')) {
@@ -1577,9 +1684,9 @@ app.post('/api/get-rag-filings', async (req, res) => {
         }
       }
     });
-    
+
     logger.info(`Found ${tenK.length} 10-K and ${tenQ.length} 10-Q filings for ${bankName}`);
-    
+
     res.json({ success: true, '10-K': tenK, '10-Q': tenQ });
   } catch (err) {
     logger.error('RAG filings error:', err);
@@ -1591,23 +1698,23 @@ app.post('/api/get-rag-filings', async (req, res) => {
 app.post('/api/add-bank-to-rag', async (req, res) => {
   const { bankName, cik } = req.body;
   if (!bankName || !cik) return res.status(400).json({ error: 'Missing bankName or cik' });
-  
+
   const bankFolder = bankName.toUpperCase().replace(/ & /g, '-').replace(/ CORP$/g, '').replace(/ INC$/g, '').replace(/ /g, '-').replace(/\./g, '');
-  
+
   try {
     const axios = require('axios');
     const AWS = require('aws-sdk');
     const s3 = new AWS.S3({ region: process.env.AWS_REGION || 'us-east-1' });
-    
+
     const s3BucketName = process.env.SEC_FILINGS_BUCKET || 'bankiq-sec-filings-164543933824-prod';
-    
+
     // Download filings from SEC EDGAR
     const headers = { 'User-Agent': 'BankIQ Analytics contact@bankiq.com' };
     const paddedCik = cik.toString().padStart(10, '0');
     const submissionsUrl = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
-    
+
     logger.info(`Fetching SEC data from: ${submissionsUrl}`);
-    
+
     let submissionsResp;
     try {
       submissionsResp = await axios.get(submissionsUrl, { headers, timeout: 10000 });
@@ -1619,45 +1726,45 @@ app.post('/api/add-bank-to-rag', async (req, res) => {
       }
       throw new Error(`Failed to fetch SEC data: ${axiosErr.message}. CIK may be invalid or SEC.gov may be rate limiting.`);
     }
-    
+
     if (!submissionsResp.data || !submissionsResp.data.filings || !submissionsResp.data.filings.recent) {
       throw new Error('Invalid response from SEC.gov - no filings data found');
     }
-    
+
     const filings = submissionsResp.data.filings.recent;
-    
+
     const targetFilings = [];
     for (let i = 0; i < filings.form.length; i++) {
       const form = filings.form[i];
       const date = filings.filingDate[i];
       const accession = filings.accessionNumber[i];
-      
+
       if ((form === '10-K' || form === '10-Q') && date >= '2024-10-01' && date <= '2025-10-31') {
         targetFilings.push({ form, date, accession });
       }
     }
-    
+
     logger.info(`Found ${targetFilings.length} filings for ${bankName} (Oct 2024-Oct 2025)`);
-    
+
     // Spawn Python script to download and upload (it handles HTML parsing and cleaning)
     logger.info(`Spawning Python script to download ${targetFilings.length} filings for ${bankName}...`);
-    
+
     const scriptPath = path.join(__dirname, 'scripts/download-single-bank.py');
     const pythonProcess = spawn('python3', [scriptPath, bankFolder, paddedCik, s3BucketName]);
-    
+
     let output = '';
     let errorOutput = '';
-    
+
     pythonProcess.stdout.on('data', (data) => {
       output += data.toString();
       logger.info(`Python: ${data.toString().trim()}`);
     });
-    
+
     pythonProcess.stderr.on('data', (data) => {
       errorOutput += data.toString();
       logger.error(`Python error: ${data.toString().trim()}`);
     });
-    
+
     pythonProcess.on('close', (code) => {
       if (code === 0) {
         logger.info(`✅ Successfully downloaded filings for ${bankName}`);
@@ -1665,20 +1772,20 @@ app.post('/api/add-bank-to-rag', async (req, res) => {
         logger.error(`❌ Python script exited with code ${code}`);
       }
     });
-    
+
     // Return immediately - download happens in background
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `Started download of ${targetFilings.length} filings for ${bankName}. Files will appear in S3 within 1-2 minutes. Knowledge Base will sync automatically (5-10 min).`
     });
-    
+
   } catch (err) {
     logger.error('Add bank to RAG error:', err.message);
     logger.error('Error stack:', err.stack);
     if (bankFolder) {
       logger.error('Bank folder attempted:', bankFolder);
     }
-    res.status(500).json({ 
+    res.status(500).json({
       error: err.message || 'Failed to add bank to RAG',
       details: 'Check that the CIK is valid and SEC.gov is accessible'
     });

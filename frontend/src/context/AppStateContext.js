@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 
 const AppStateContext = createContext();
 
@@ -10,32 +10,16 @@ export const useAppState = () => {
   return context;
 };
 
-const loadState = (key, defaultValue) => {
-  try {
-    const saved = localStorage.getItem(`bankiq_${key}`);
-    return saved ? JSON.parse(saved) : defaultValue;
-  } catch {
-    return defaultValue;
-  }
-};
-
-const saveState = (key, value) => {
-  try {
-    localStorage.setItem(`bankiq_${key}`, JSON.stringify(value));
-  } catch (e) {
-    console.warn('Failed to save state:', e);
-  }
-};
-
 export const AppStateProvider = ({ children }) => {
-  const [peerState, setPeerState] = useState(() => loadState('peer', {
+  // Clean slate - no persistence
+  const [peerState, setPeerState] = useState({
     selectedBanks: [],
     comparisonData: null,
     chartData: null,
     loading: false
-  }));
+  });
 
-  const [reportsState, setReportsState] = useState(() => loadState('reports', {
+  const [reportsState, setReportsState] = useState({
     selectedBank: '',
     selectedBankCik: null,
     chatHistory: [],
@@ -44,35 +28,66 @@ export const AppStateProvider = ({ children }) => {
     mode: 'live',
     uploadedFiles: [],
     analyzedDocs: []
-  }));
+  });
 
-  const [complianceState, setComplianceState] = useState(() => loadState('compliance', {
+  const [complianceState, setComplianceState] = useState({
     selectedBank: '',
     selectedBankCik: null,
     complianceData: null,
     aiAnalysis: '',
     alerts: []
-  }));
+  });
 
-  useEffect(() => {
-    saveState('peer', peerState);
-  }, [peerState]);
+  // Reset functions for clean slate
+  const resetPeerState = () => {
+    setPeerState({
+      selectedBanks: [],
+      comparisonData: null,
+      chartData: null,
+      loading: false
+    });
+  };
 
-  useEffect(() => {
-    saveState('reports', reportsState);
-  }, [reportsState]);
+  const resetReportsState = () => {
+    setReportsState({
+      selectedBank: '',
+      selectedBankCik: null,
+      chatHistory: [],
+      reports: { '10-K': [], '10-Q': [] },
+      fullReport: '',
+      mode: 'live',
+      uploadedFiles: [],
+      analyzedDocs: []
+    });
+  };
 
-  useEffect(() => {
-    saveState('compliance', complianceState);
-  }, [complianceState]);
+  const resetComplianceState = () => {
+    setComplianceState({
+      selectedBank: '',
+      selectedBankCik: null,
+      complianceData: null,
+      aiAnalysis: '',
+      alerts: []
+    });
+  };
+
+  const resetAllState = () => {
+    resetPeerState();
+    resetReportsState();
+    resetComplianceState();
+  };
 
   const value = {
     peerState,
     setPeerState,
+    resetPeerState,
     reportsState,
     setReportsState,
+    resetReportsState,
     complianceState,
-    setComplianceState
+    setComplianceState,
+    resetComplianceState,
+    resetAllState
   };
 
   return (

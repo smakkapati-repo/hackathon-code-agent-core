@@ -1456,44 +1456,45 @@ IMPORTANT INSTRUCTIONS FOR PEER ANALYSIS:
    - Call search_banks tool
    - Return the EXACT JSON output from the tool (including the "results" array)
    - Do not modify or summarize the results
-5. For SEC filings requests:
-   - Call get_sec_filings TWICE: once with form_type="10-K" and once with form_type="10-Q"
-   - If a CIK is provided, pass it as the 'cik' parameter
-   - Return BOTH results in format: DATA: {"10-K": [...], "10-Q": [...]}
-   - Include all filings from 2023, 2024, and 2025
+5. For SEC filings and full reports:
+   - Call appropriate tools (get_sec_filings, get_fdic_data, etc.)
+   - Use the data internally to write your analysis
+   - NEVER include raw JSON or DATA: prefixes in your response
+   - Provide clean, professional analysis only
 
+**RESPONSE FORMATTING RULES:**
 
+1. **Full Reports**: Write 8 sections with ## markdown headers, 6-8 paragraphs each
+2. **Chat/Q&A**: Write 3-4 comprehensive paragraphs
+3. **Peer Comparisons**: First line is JSON with chart data, then expanded analysis below
+4. **Bank Search**: Return ONLY the raw JSON from search_banks tool
+5. **Compliance Assessment**: First line is COMPLIANCE_DATA: JSON, then analysis below
 
-Example response format for comparisons:
-DATA: {"data": [...], "analysis": "...", "base_bank": "...", "peer_banks": [...]}
+**CRITICAL**: For full reports and chat, NEVER include DATA: prefixes or raw JSON. Use tool data internally and write clean analysis only.
 
-[6-8 paragraph business-style analysis here covering: executive summary, performance comparison, trends analysis, competitive positioning, risk assessment, strategic implications, market outlook, and investment perspective]
+Example for full reports and chat:
+# 📊 Full Financial Analysis Report - [Bank Name]
 
-Example response format for bank search:
-{"success": true, "results": [{"name": "WEBSTER FINANCIAL CORP", "cik": "0000801337", "ticker": "WBS"}]}
+## Executive Summary
+[Professional analysis here - NO JSON, NO DATA: prefix]
 
-Example response format for SEC filings:
-DATA: {"10-K": [...], "10-Q": [...]}
-
-[2 paragraph summary here]
-
-Example response format for chat questions:
-[4-6 paragraphs with comprehensive business analysis]
-
-Example response format for compliance_risk_assessment:
+Example for compliance:
 COMPLIANCE_DATA: {"success": true, "overall_score": 87, "scores": {...}, "metrics": {...}}
 
 [Then provide your analysis]
 
-Be professional and business-focused. For chat and reports, provide ONLY clean text analysis with NO JSON data (EXCEPT for compliance_risk_assessment which MUST include the COMPLIANCE_DATA: JSON line first)."""
+Be professional and business-focused."""
 
 @app.entrypoint
 async def invoke(payload):
     """AgentCore entrypoint with streaming support"""
     user_message = payload.get("prompt", "Hello! I'm BankIQ+, your banking analyst.")
+    print(f"[AGENT] Streaming for: {user_message[:50]}")
     stream = agent.stream_async(user_message)
     async for event in stream:
+        print(f"[AGENT] Event: {type(event)} - {str(event)[:100]}")
         yield event
+    print("[AGENT] Stream complete")
 
 if __name__ == "__main__":
     app.run()

@@ -114,6 +114,18 @@ Resources:
           OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # CORS-S3Origin
         
         CacheBehaviors:
+          # Streaming endpoint - no caching, no buffering
+          - PathPattern: /api/invoke-agent-stream
+            TargetOriginId: ALBOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - POST
+              - OPTIONS
+            Compress: false
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3  # AllViewer
+            ResponseHeadersPolicyId: 5cc3b908-e619-4b99-88e5-2cf7f45965bd  # CORS-with-preflight-and-SecurityHeadersPolicy
+          
           # Backend API routes
           - PathPattern: /api/*
             TargetOriginId: ALBOrigin

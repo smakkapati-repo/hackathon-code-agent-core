@@ -1,22 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
+// Modified to NOT persist - gives clean slate on tab/mode switch
 export const usePersistedState = (key, defaultValue) => {
-  const [state, setState] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem(`bankiq_${key}`);
-      return saved ? JSON.parse(saved) : defaultValue;
-    } catch {
-      return defaultValue;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(`bankiq_${key}`, JSON.stringify(state));
-    } catch (e) {
-      console.warn('Failed to persist state:', e);
-    }
-  }, [key, state]);
-
+  const [state, setState] = useState(defaultValue);
   return [state, setState];
 };

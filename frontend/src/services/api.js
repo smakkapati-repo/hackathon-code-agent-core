@@ -20,6 +20,25 @@ async function getAuthHeaders() {
   return headers;
 }
 
+// Helper function to safely parse JSON responses
+async function safeJsonParse(response) {
+  const contentType = response.headers.get('content-type');
+  
+  // Check if response is JSON
+  if (!contentType || !contentType.includes('application/json')) {
+    const text = await response.text();
+    console.error('Server returned non-JSON response:', text.substring(0, 200));
+    throw new Error(`Server error: Expected JSON but got ${contentType || 'unknown content type'}. Response: ${text.substring(0, 100)}`);
+  }
+  
+  try {
+    return await response.json();
+  } catch (e) {
+    console.error('Failed to parse JSON:', e);
+    throw new Error('Invalid JSON response from server');
+  }
+}
+
 // Removed callBackend function - all endpoints now use async jobs for reliability
 
 export const api = {
@@ -31,7 +50,7 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bankName })
       });
-      return await response.json();
+      return await safeJsonParse(response);
     }
     
     // Use direct backend endpoint for faster, more reliable SEC filings
@@ -43,7 +62,7 @@ export const api = {
           body: JSON.stringify({ bankName, cik })
         });
         
-        const data = await response.json();
+        const data = await safeJsonParse(response);
         
         if (data.success) {
           return {
@@ -285,19 +304,30 @@ Your detailed analysis here...`;
       }
     }
     
-    const job = await this.submitJob(`Use the answer_banking_question tool to answer this question: "${prompt}". Call answer_banking_question with question: "${prompt}" and context: "${bankName || 'General banking question'}".`);
+    const job = await this.submitJob(`Answer this banking question: "${prompt}" about ${bankName || 'general banking'}`);
     const result = await this.pollJobUntilComplete(job.jobId);
     
     let cleanResponse = result.result;
+    
+    // Remove DATA: lines (tool output) from response
     if (cleanResponse && cleanResponse.includes('DATA:')) {
-      cleanResponse = cleanResponse.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
+      cleanResponse = cleanResponse.replace(/DATA:\s*\{[\s\S]*?\}\s*\n*/g, '');
     }
+    
+    // Remove "I don't have access to..." preambles
+    cleanResponse = cleanResponse.replace(/^I don't have access to (?:a |an |the )?[\w_]+.*?(?:tool|function).*?(?:\.|However,|But)\s*/i, '');
+    
+    // Remove "Let me gather/get..." lines
+    cleanResponse = cleanResponse.replace(/^Let me (?:gather|get|fetch).*?:\s*/gm, '');
+    cleanResponse = cleanResponse.replace(/^Now let me (?:gather|get|fetch).*?:\s*/gm, '');
+    
+    cleanResponse = cleanResponse.trim();
     
     return { response: cleanResponse, sources: [] };
   },
 
   async generateFullReport(bankName) {
-    const job = await this.submitJob(`Use the generate_bank_report tool to create a comprehensive financial analysis report for ${bankName}. Call generate_bank_report with bank_name: "${bankName}".`);
+    const job = await this.submitJob(`Generate a comprehensive financial analysis report for ${bankName} using available tools.`);
     const result = await this.pollJobUntilComplete(job.jobId);
     
     // Clean response - remove DATA: lines from reports
@@ -320,30 +350,64 @@ Your detailed analysis here...`;
     });
     
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Job submission failed: ${response.status}`);
+      }
       throw new Error(`Job submission failed: ${response.status}`);
     }
     
-    return response.json();
+    return safeJsonParse(response);
   },
 
   async checkJobStatus(jobId) {
     const response = await fetch(`${BACKEND_URL}/api/jobs/${jobId}`);
     
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Job status check failed: ${response.status}`);
+      }
       throw new Error(`Job status check failed: ${response.status}`);
     }
     
-    return response.json();
+    return safeJsonParse(response);
   },
 
   async getJobResult(jobId) {
     const response = await fetch(`${BACKEND_URL}/api/jobs/${jobId}/result`);
     
-    const data = await response.json();
+    // Get response body as text first (can only read once)
+    const responseText = await response.text();
     
-    // If job failed, throw error with the actual error message
-    if (!response.ok || data.status === 'failed') {
-      throw new Error(data.error || `Job failed with status ${response.status}`);
+    // Check if response is OK
+    if (!response.ok) {
+      console.error(`Job result error (${response.status}):`, responseText.substring(0, 200));
+      
+      // Try to parse as JSON to get error message
+      try {
+        const errorData = JSON.parse(responseText);
+        throw new Error(errorData.error || errorData.message || `Job failed with status ${response.status}`);
+      } catch (parseError) {
+        // Not JSON, return text error
+        throw new Error(`Job failed (${response.status}): ${responseText.substring(0, 100)}`);
+      }
+    }
+    
+    // Parse successful response
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse job result:', responseText.substring(0, 200));
+      throw new Error('Invalid response from server');
+    }
+    
+    // Check if job itself failed
+    if (data.status === 'failed') {
+      throw new Error(data.error || 'Job processing failed');
     }
     
     return data;
@@ -374,7 +438,7 @@ Your detailed analysis here...`;
         body: JSON.stringify({ query })
       });
       
-      const data = await response.json();
+      const data = await safeJsonParse(response);
       
       if (data.success && data.results) {
         console.log('Search results:', data.results);
@@ -419,7 +483,7 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
       });
       
       if (response.ok) {
-        const result = await response.json();
+        const result = await safeJsonParse(response);
         console.log('✓ Agent-powered upload successful');
         return result;
       }
@@ -442,14 +506,14 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
       throw new Error(`Upload failed: ${response.status}`);
     }
     
-    const result = await response.json();
+    const result = await safeJsonParse(response);
     return { ...result, method: 'direct' };
   },
 
   async checkRagAvailability() {
     try {
       const response = await fetch(`${BACKEND_URL}/api/rag/status`);
-      const data = await response.json();
+      const data = await safeJsonParse(response);
       return { available: data.available || false, kbId: data.kbId };
     } catch (err) {
       return { available: false };
@@ -462,7 +526,7 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
       if (!response.ok) {
         throw new Error(`Failed to fetch RAG banks: ${response.status}`);
       }
-      return await response.json();
+      return await safeJsonParse(response);
     } catch (err) {
       console.error('Error fetching RAG banks:', err);
       return { success: false, banks: [] };
@@ -496,11 +560,7 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
     }
     
     // Parse successful response
-    try {
-      return await response.json();
-    } catch (parseErr) {
-      throw new Error('Invalid response from server');
-    }
+    return await safeJsonParse(response);
   },
 
   // Streaming method
