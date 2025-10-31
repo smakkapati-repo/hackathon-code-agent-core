@@ -149,8 +149,11 @@ function FinancialReports() {
         sources: []
       }]);
       
+      console.log('[CHAT] useStreaming:', useStreaming, 'mode:', mode);
+      
       if (useStreaming && mode !== 'local') {
         // Streaming mode
+        console.log('[CHAT] Using streaming mode');
         await api.streamChat(
           messageToSend,
           selectedBank,
@@ -241,7 +244,6 @@ function FinancialReports() {
       
       let inputText;
       
-      // Mode-specific tool selection
       const formatRequirements = `
 
 Format requirements:
@@ -251,7 +253,6 @@ Format requirements:
 - Include specific metrics and data from filings`;
 
       if (mode === 'local' && analyzedDocs.length > 0) {
-        // LOCAL MODE: Use generate_local_document_report
         const doc = analyzedDocs[0];
         if (doc.s3_key) {
           inputText = `Generate a full financial analysis report for ${doc.bank_name} using their uploaded ${doc.form_type} document.
@@ -261,64 +262,83 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
           inputText = `Generate a comprehensive financial analysis report for ${selectedBank} based on their ${doc.form_type} filing for fiscal year ${doc.year}.${formatRequirements}`;
         }
       } else if (mode === 'rag') {
-        // RAG MODE: Use generate_rag_indexed_report
         inputText = `IMPORTANT: You MUST use the generate_rag_indexed_report tool.
 
 Call generate_rag_indexed_report(bank_name="${selectedBank}")${formatRequirements}`;
       } else {
-        // LIVE MODE: Use generate_live_sec_report
         inputText = `IMPORTANT: You MUST use the generate_live_sec_report tool.
 
 Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, cik="${selectedBankCik}"` : ''})${formatRequirements}`;
       }
       
-      // Submit async job
-      console.log('Submitting async job for full report...');
-      setPollingStatus('Submitting request...');
-      const jobSubmission = await api.submitJob(inputText, 'full-report');
-      const jobId = jobSubmission.jobId;
-      
-      console.log(`Job ${jobId} submitted, polling for completion...`);
-      setPollingStatus('Generating report (this may take 1-2 minutes)...');
-      
-      // Store job ID in localStorage and start background polling
-      localStorage.setItem('pendingReportJobId', jobId);
-      
-      // Start polling in background (continues even if component unmounts)
-      const pollInBackground = async () => {
-        try {
-          const result = await api.pollJobUntilComplete(jobId, 120, 2000);
-          
-          if (result.status === 'failed') {
-            localStorage.setItem('reportError', result.error || 'Job failed');
+      if (useStreaming && mode !== 'local') {
+        // Streaming mode for full report
+        setPollingStatus('Generating report (streaming)...');
+        let reportText = '';
+        
+        await api.streamChat(
+          inputText,
+          selectedBank,
+          reports,
+          mode === 'rag',
+          selectedBankCik,
+          (chunk) => {
+            reportText += chunk;
+            setFullReport(reportText);
+          },
+          () => {
+            setPollingStatus('');
+            setReportLoading(false);
+          },
+          (error) => {
+            setError('Failed to generate report: ' + error);
+            setPollingStatus('');
+            setReportLoading(false);
+          }
+        );
+      } else {
+        // Polling mode (original)
+        console.log('Submitting async job for full report...');
+        setPollingStatus('Submitting request...');
+        const jobSubmission = await api.submitJob(inputText, 'full-report');
+        const jobId = jobSubmission.jobId;
+        
+        console.log(`Job ${jobId} submitted, polling for completion...`);
+        setPollingStatus('Generating report (this may take 1-2 minutes)...');
+        
+        localStorage.setItem('pendingReportJobId', jobId);
+        
+        const pollInBackground = async () => {
+          try {
+            const result = await api.pollJobUntilComplete(jobId, 120, 2000);
+            
+            if (result.status === 'failed') {
+              localStorage.setItem('reportError', result.error || 'Job failed');
+              localStorage.removeItem('pendingReportJobId');
+              return;
+            }
+            
+            let cleanReport = result.result;
+            if (cleanReport.includes('DATA:')) {
+              cleanReport = cleanReport.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
+            }
+            
+            localStorage.setItem('completedReport', cleanReport);
             localStorage.removeItem('pendingReportJobId');
-            return;
+            
+            setFullReport(cleanReport);
+            setPollingStatus('');
+            setReportLoading(false);
+            console.log('Full report generated successfully');
+          } catch (err) {
+            console.error('Background polling error:', err);
+            localStorage.setItem('reportError', err.message);
+            localStorage.removeItem('pendingReportJobId');
           }
-          
-          // Remove DATA: line from report display
-          let cleanReport = result.result;
-          if (cleanReport.includes('DATA:')) {
-            cleanReport = cleanReport.replace(/DATA:\s*\{[\s\S]*?\}\s*\n+/g, '').trim();
-          }
-          
-          // Store completed report in localStorage
-          localStorage.setItem('completedReport', cleanReport);
-          localStorage.removeItem('pendingReportJobId');
-          
-          // Update state if component is still mounted
-          setFullReport(cleanReport);
-          setPollingStatus('');
-          setReportLoading(false);
-          console.log('Full report generated successfully');
-        } catch (err) {
-          console.error('Background polling error:', err);
-          localStorage.setItem('reportError', err.message);
-          localStorage.removeItem('pendingReportJobId');
-        }
-      };
-      
-      // Start background polling (don't await)
-      pollInBackground();
+        };
+        
+        pollInBackground();
+      }
       
     } catch (err) {
       console.error('Full report generation error:', err);
@@ -854,7 +874,10 @@ Call generate_live_sec_report(bank_name="${selectedBank}"${selectedBankCik ? `, 
                       control={
                         <Switch 
                           checked={useStreaming} 
-                          onChange={(e) => setUseStreaming(e.target.checked)}
+                          onChange={(e) => {
+                            console.log('[TOGGLE] Streaming:', e.target.checked);
+                            setUseStreaming(e.target.checked);
+                          }}
                           size="small"
                         />
                       }

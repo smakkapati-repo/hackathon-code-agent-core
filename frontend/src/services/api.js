@@ -505,6 +505,7 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
 
   // Streaming method
   async streamChat(question, bankName, reports, useRag, cik, onChunk, onComplete, onError) {
+    console.log('[STREAMING] Starting stream for:', question.substring(0, 50));
     let prompt = question;
     
     if (bankName) {
@@ -521,11 +522,13 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
     }
 
     try {
+      console.log('[STREAMING] Fetching from:', `${BACKEND_URL}/api/invoke-agent-stream`);
       const response = await fetch(`${BACKEND_URL}/api/invoke-agent-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inputText: prompt })
       });
+      console.log('[STREAMING] Response status:', response.status);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -544,6 +547,7 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
             try {
               const data = JSON.parse(line.slice(6));
               if (data.chunk) {
+                console.log('[STREAMING] Chunk received:', data.chunk.substring(0, 20));
                 onChunk(data.chunk);
               } else if (data.done) {
                 onComplete();

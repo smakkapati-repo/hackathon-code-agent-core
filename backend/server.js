@@ -326,12 +326,8 @@ app.post('/api/invoke-agent-stream', async (req, res) => {
             output = result.text || JSON.stringify(result);
           }
           
-          // Stream output word by word
-          const words = output.split(' ');
-          words.forEach((word, i) => {
-            res.write(`data: ${JSON.stringify({ chunk: word + (i < words.length - 1 ? ' ' : '') })}\n\n`);
-          });
-          
+          // Send complete response immediately
+          res.write(`data: ${JSON.stringify({ chunk: output })}\n\n`);
           res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
           res.end();
         } catch (e) {
