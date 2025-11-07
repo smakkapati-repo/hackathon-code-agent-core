@@ -5,7 +5,7 @@ const https = require('https');
 const { spawn } = require('child_process');
 const path = require('path');
 const { verifyToken } = require('./auth-middleware');
-const NodeCache = require('node-cache');
+
 
 // ============================================================================
 // DEBUG CONFIGURATION
@@ -41,49 +41,7 @@ AWS.config.update({
   logger: DEBUG_MODE ? console : undefined // Enable AWS SDK logging in debug mode
 });
 
-// ============================================================================
-// CACHE CONFIGURATION
-// ============================================================================
 
-// Create cache instances with different TTLs for different data types
-const secCache = new NodeCache({
-  stdTTL: 86400,  // 24 hours (SEC filings don't change often)
-  checkperiod: 3600,  // Check for expired keys every hour
-  useClones: false  // Better performance, data is immutable
-});
-
-const fdicCache = new NodeCache({
-  stdTTL: 3600,  // 1 hour (FDIC data updates daily)
-  checkperiod: 600,  // Check every 10 minutes
-  useClones: false
-});
-
-const bankSearchCache = new NodeCache({
-  stdTTL: 604800,  // 7 days (bank names rarely change)
-  checkperiod: 86400,  // Check daily
-  useClones: false
-});
-
-// Cache metrics for monitoring
-const cacheMetrics = {
-  sec: { hits: 0, misses: 0 },
-  fdic: { hits: 0, misses: 0 },
-  search: { hits: 0, misses: 0 },
-  getHitRate(type) {
-    const metrics = this[type];
-    const total = metrics.hits + metrics.misses;
-    return total > 0 ? (metrics.hits / total * 100).toFixed(2) + '%' : '0%';
-  }
-};
-
-// Log cache stats periodically
-setInterval(() => {
-  logger.info('Cache statistics:', {
-    sec: { ...secCache.getStats(), hitRate: cacheMetrics.getHitRate('sec') },
-    fdic: { ...fdicCache.getStats(), hitRate: cacheMetrics.getHitRate('fdic') },
-    search: { ...bankSearchCache.getStats(), hitRate: cacheMetrics.getHitRate('search') }
-  });
-}, 300000); // Every 5 minutes
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -947,19 +905,6 @@ app.post('/api/get-sec-filings', async (req, res) => {
       return res.json({ success: false, error: 'Invalid CIK', '10-K': [], '10-Q': [] });
     }
 
-    // Check cache first
-    const cacheKey = `sec:${targetCik}`;
-    const cached = secCache.get(cacheKey);
-
-    if (cached) {
-      cacheMetrics.sec.hits++;
-      logger.debug(`SEC cache HIT for ${bankName} (${cacheKey}) - Hit rate: ${cacheMetrics.getHitRate('sec')}`);
-      return res.json(cached);
-    }
-
-    cacheMetrics.sec.misses++;
-    logger.info(`SEC cache MISS for ${bankName} (${cacheKey}) - Fetching from SEC.gov - Hit rate: ${cacheMetrics.getHitRate('sec')}`);
-
     const axios = require('axios');
     const headers = { 'User-Agent': 'BankIQ Analytics contact@bankiq.com' };
     const url = `https://data.sec.gov/submissions/CIK${targetCik}.json`;
@@ -1004,13 +949,9 @@ app.post('/api/get-sec-filings', async (req, res) => {
     const result = {
       success: true,
       response: `Found ${tenK.length} 10-K and ${tenQ.length} 10-Q filings for ${bankName}`,
-      '10-K': tenK,  // Return all 10-K filings (usually 2-3)
-      '10-Q': tenQ   // Return all 10-Q filings (usually 6-9)
+      '10-K': tenK,
+      '10-Q': tenQ
     };
-
-    // Store in cache
-    secCache.set(cacheKey, result);
-    logger.debug(`Cached SEC data for ${cacheKey} (24 hour TTL)`);
 
     res.json(result);
 
@@ -1029,19 +970,6 @@ app.post('/api/search-banks', async (req, res) => {
   }
 
   try {
-    // Check cache first
-    const cacheKey = `search:${query.toLowerCase()}`;
-    const cached = bankSearchCache.get(cacheKey);
-
-    if (cached) {
-      cacheMetrics.search.hits++;
-      logger.debug(`Bank search cache HIT for "${query}" - Hit rate: ${cacheMetrics.getHitRate('search')}`);
-      return res.json(cached);
-    }
-
-    cacheMetrics.search.misses++;
-    logger.info(`Bank search cache MISS for "${query}" - Hit rate: ${cacheMetrics.getHitRate('search')}`);
-
     // Major banks cache
     const majorBanks = [
       { "name": "JPMORGAN CHASE & CO", "ticker": "JPM", "cik": "0000019617" },
@@ -1114,10 +1042,6 @@ app.post('/api/search-banks', async (req, res) => {
     }
 
     const finalResult = { success: true, results: results.slice(0, 10) };
-
-    // Cache the result (7 day TTL)
-    bankSearchCache.set(cacheKey, finalResult);
-    logger.debug(`Cached search results for "${query}" (7 day TTL)`);
 
     res.json(finalResult);
 
@@ -1456,80 +1380,6 @@ setInterval(() => {
     }
   }
 }, 10 * 60 * 1000);
-
-// ============================================================================
-// CACHE MANAGEMENT ENDPOINTS
-// ============================================================================
-
-// Get cache statistics
-app.get('/api/admin/cache-stats', (req, res) => {
-  res.json({
-    sec: {
-      ...secCache.getStats(),
-      hitRate: cacheMetrics.getHitRate('sec'),
-      hits: cacheMetrics.sec.hits,
-      misses: cacheMetrics.sec.misses
-    },
-    fdic: {
-      ...fdicCache.getStats(),
-      hitRate: cacheMetrics.getHitRate('fdic'),
-      hits: cacheMetrics.fdic.hits,
-      misses: cacheMetrics.fdic.misses
-    },
-    search: {
-      ...bankSearchCache.getStats(),
-      hitRate: cacheMetrics.getHitRate('search'),
-      hits: cacheMetrics.search.hits,
-      misses: cacheMetrics.search.misses
-    }
-  });
-});
-
-// Clear specific cache or all caches
-app.post('/api/admin/clear-cache', (req, res) => {
-  const { type } = req.body;
-
-  try {
-    switch (type) {
-      case 'sec':
-        secCache.flushAll();
-        cacheMetrics.sec = { hits: 0, misses: 0 };
-        logger.info('SEC cache cleared');
-        break;
-      case 'fdic':
-        fdicCache.flushAll();
-        cacheMetrics.fdic = { hits: 0, misses: 0 };
-        logger.info('FDIC cache cleared');
-        break;
-      case 'search':
-        bankSearchCache.flushAll();
-        cacheMetrics.search = { hits: 0, misses: 0 };
-        logger.info('Bank search cache cleared');
-        break;
-      case 'all':
-        secCache.flushAll();
-        fdicCache.flushAll();
-        bankSearchCache.flushAll();
-        cacheMetrics.sec = { hits: 0, misses: 0 };
-        cacheMetrics.fdic = { hits: 0, misses: 0 };
-        cacheMetrics.search = { hits: 0, misses: 0 };
-        logger.info('All caches cleared');
-        break;
-      default:
-        return res.status(400).json({
-          error: 'Invalid cache type. Use: sec, fdic, search, or all'
-        });
-    }
-
-    res.json({
-      success: true,
-      message: `${type} cache cleared successfully`
-    });
-  } catch (error) {
-    logger.error('Cache clear error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 
 // ============================================================================

@@ -44,10 +44,10 @@ const theme = createTheme({
   palette: {
     mode: 'light',
     primary: {
-      main: '#A020F0',
+      main: '#146EB4', // AWS blue
     },
     secondary: {
-      main: '#8B1A9B',
+      main: '#FF9900', // AWS orange
     },
     background: {
       default: '#FAFAFA',
@@ -197,7 +197,7 @@ function App() {
       <CssBaseline />
       <AppStateProvider>
       <Box sx={{ flexGrow: 1 }}>
-        <AppBar position="static" elevation={0} sx={{ background: 'linear-gradient(135deg, #A020F0 0%, #8B1A9B 100%)' }}>
+        <AppBar position="static" elevation={0} sx={{ background: 'linear-gradient(135deg, #146EB4 0%, #232F3E 100%)' }}>
           <Toolbar>
             <AccountBalanceIcon sx={{ mr: 2 }} />
             <Typography variant="h4" component="div" sx={{ flexGrow: 1, fontWeight: 600 }}>
@@ -211,10 +211,10 @@ function App() {
             value={tabValue} 
             onChange={handleTabChange} 
             sx={{ 
-              backgroundColor: '#1e3a8a',
+              backgroundColor: '#232F3E',
               '& .MuiTab-root': { color: 'rgba(255,255,255,0.8)' },
-              '& .Mui-selected': { color: 'white !important' },
-              '& .MuiTabs-indicator': { backgroundColor: 'white' }
+              '& .Mui-selected': { color: '#FF9900 !important' },
+              '& .MuiTabs-indicator': { backgroundColor: '#FF9900' }
             }}
           >
             <Tab icon={<AccountBalanceIcon />} label="Home" />

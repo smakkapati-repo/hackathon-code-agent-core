@@ -50,7 +50,7 @@ function FinancialReports() {
   const [ragBanks, setRagBanks] = useState([]);
   const [loadingRagBanks, setLoadingRagBanks] = useState(false);
   const pollingRef = useRef(null);
-  const [useStreaming, setUseStreaming] = useState(true); // Default to streaming for better UX
+  const [useStreaming, setUseStreaming] = useState(true); // Streaming enabled
 
   // Fallback popular banks with CIKs for search/selection
   const popularBanks = {
@@ -187,11 +187,14 @@ function FinancialReports() {
               if (newHistory[lastIndex]?.role === 'assistant') {
                 let content = newHistory[lastIndex].content;
                 
-                // Remove DATA: and COMPLIANCE_DATA: lines completely
+                // Remove DATA:, COMPLIANCE_DATA:, and any JSON data lines
                 const lines = content.split('\n');
                 content = lines.filter(line => {
                   const trimmed = line.trim();
-                  return !trimmed.startsWith('DATA:') && !trimmed.startsWith('COMPLIANCE_DATA:');
+                  // Filter out DATA:, COMPLIANCE_DATA:, and lines that look like JSON objects
+                  return !trimmed.startsWith('DATA:') && 
+                         !trimmed.startsWith('COMPLIANCE_DATA:') &&
+                         !trimmed.match(/^[A-Z_]+:\s*\{/);
                 }).join('\n');
                 
                 // Remove "I don't have access to..." preambles
@@ -200,6 +203,7 @@ function FinancialReports() {
                 // Remove "Let me gather/get..." lines
                 content = content.replace(/^Let me (?:gather|get|fetch).*?:\s*/gm, '');
                 content = content.replace(/^Now let me (?:gather|get|fetch).*?:\s*/gm, '');
+                content = content.replace(/^I'll (?:analyze|retrieve|get).*?:\s*/gm, '');
                 
                 newHistory[lastIndex].content = content.trim();
               }
@@ -898,27 +902,10 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
           <Grid item xs={12} md={6}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
-                    <ChatIcon sx={{ mr: 1 }} />
-                    AI Chat Interface
-                  </Typography>
-                  {mode !== 'local' && (
-                    <FormControlLabel
-                      control={
-                        <Switch 
-                          checked={useStreaming} 
-                          onChange={(e) => {
-                            console.log('[TOGGLE] Streaming:', e.target.checked);
-                            setUseStreaming(e.target.checked);
-                          }}
-                          size="small"
-                        />
-                      }
-                      label={<Typography variant="caption">Stream {useStreaming ? '⚡' : ''}</Typography>}
-                    />
-                  )}
-                </Box>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <ChatIcon sx={{ mr: 1 }} />
+                  AI Chat Interface
+                </Typography>
                 
                 {/* Chat History */}
                 <Paper 

@@ -84,7 +84,7 @@ const ComplianceAudit = () => {
   const [dataSource, setDataSource] = usePersistedState('compliance_dataSource', '');
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [useStreaming, setUseStreaming] = useState(true); // Streaming toggle
+  const useStreaming = true; // Always use streaming
 
   const popularBanks = {
     "JPMORGAN CHASE & CO": "0000019617",
@@ -170,20 +170,24 @@ const ComplianceAudit = () => {
           selectedBankCik,
           (chunk) => {
             analysisText += chunk;
-            // Remove COMPLIANCE_DATA and JSON lines from display
+            // Filter out agent thinking and JSON
             let displayText = analysisText;
             const lines = displayText.split('\n');
             const cleanLines = lines.filter(line => {
               const trimmed = line.trim();
-              // Remove lines with COMPLIANCE_DATA or JSON structures
               return !trimmed.startsWith('COMPLIANCE_DATA:') && 
                      !trimmed.startsWith('{') && 
                      !trimmed.startsWith('}') &&
                      !trimmed.includes('"risk_gauges"') &&
-                     !trimmed.includes('"metrics"');
+                     !trimmed.includes('"metrics"') &&
+                     !trimmed.startsWith('I\'ll provide') &&
+                     !trimmed.startsWith('I\'ll use');
             });
             displayText = cleanLines.join('\n').trim();
-            setAiAnalysis(displayText || 'Analyzing...');
+            // Only show if we have actual analysis (starts with #)
+            if (displayText.includes('# ')) {
+              setAiAnalysis(displayText);
+            }
           },
           () => {
             console.log('AI Analysis streaming complete');
@@ -603,18 +607,7 @@ const ComplianceAudit = () => {
                 >
                   {analysisLoading ? 'Analyzing...' : 'AI Analysis'}
                 </Button>
-                <FormControlLabel
-                  control={
-                    <Switch 
-                      checked={useStreaming} 
-                      onChange={(e) => setUseStreaming(e.target.checked)}
-                      disabled={loading || analysisLoading}
-                      size="small"
-                    />
-                  }
-                  label={<Typography variant="caption">Stream {useStreaming ? '⚡' : ''}</Typography>}
-                  sx={{ minWidth: 120 }}
-                />
+
               </Stack>
             </Box>
           )}
@@ -829,8 +822,7 @@ const ComplianceAudit = () => {
                     <Typography variant="body1" sx={{ lineHeight: 1.8, opacity: 0.95 }}>
                       {(() => {
                         let cleanText = aiAnalysis;
-                        
-                        // Remove JSON blocks by finding matching braces
+                        // Remove JSON blocks
                         if (cleanText.includes('{') && cleanText.includes('"success"')) {
                           let startIdx = cleanText.indexOf('{');
                           let braceCount = 0;
@@ -845,13 +837,14 @@ const ComplianceAudit = () => {
                           }
                           cleanText = cleanText.substring(endIdx).trim();
                         }
-                        
-                        // Extract first meaningful paragraph
+                        // Remove agent thinking
+                        cleanText = cleanText.replace(/^I'll provide.*?\n\n/s, '');
+                        cleanText = cleanText.replace(/^I'll use.*?\n\n/s, '');
+                        // Extract first paragraph after title
                         if (cleanText.includes('## ')) {
                           return cleanText.split('## ')[0].replace(/^# .*?\n\n/, '').split('\n\n')[0];
                         }
-                        
-                        const paragraphs = cleanText.split('\n\n').filter(p => p.trim().length > 50);
+                        const paragraphs = cleanText.split('\n\n').filter(p => p.trim().length > 50 && !p.startsWith('I\'ll'));
                         return paragraphs[0] || 'AI analysis completed successfully.';
                       })()}
                     </Typography>
@@ -891,9 +884,10 @@ const ComplianceAudit = () => {
                 {/* Key Insights - Professional Business Style */}
                 <Grid container spacing={2}>
                   {(() => {
-                    const sections = aiAnalysis.includes('## ') ? aiAnalysis.split('## ').slice(1) : [aiAnalysis];
+                    let cleanAnalysis = aiAnalysis.replace(/^I'll provide.*?\n\n/s, '').replace(/^I'll use.*?\n\n/s, '');
+                    const sections = cleanAnalysis.includes('## ') ? cleanAnalysis.split('## ').slice(1) : [cleanAnalysis];
                     const insights = sections.slice(0, 4).map((section, index) => {
-                      const [title, ...content] = aiAnalysis.includes('## ') ? section.split('\n\n') : [`Key Insight ${index + 1}`, section];
+                      const [title, ...content] = cleanAnalysis.includes('## ') ? section.split('\n\n') : [`Key Insight ${index + 1}`, section];
                       const contentText = content.join(' ').split('.').slice(0, 2).join('.') + '.';
                       return { title: title.trim(), content: contentText.trim() };
                     });

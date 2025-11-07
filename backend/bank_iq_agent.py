@@ -1440,7 +1440,7 @@ MODE-SPECIFIC DATA TOOLS:
 **COMPLIANCE TOOLS** (work in all modes):
 - compliance_risk_assessment + regulatory_alerts_monitor: Use together for comprehensive analysis
 - audit_document_analyzer: For uploaded documents
-- CRITICAL: For compliance_risk_assessment, return RAW JSON with COMPLIANCE_DATA: prefix first
+- CRITICAL: Use tool data internally, write clean 3-4 paragraph analysis - NO JSON output
 
 IMPORTANT INSTRUCTIONS FOR PEER ANALYSIS:
 1. When using compare_banks or analyze_csv_peer_performance:
@@ -1468,20 +1468,17 @@ IMPORTANT INSTRUCTIONS FOR PEER ANALYSIS:
 2. **Chat/Q&A**: Write 3-4 comprehensive paragraphs
 3. **Peer Comparisons**: First line is JSON with chart data, then expanded analysis below
 4. **Bank Search**: Return ONLY the raw JSON from search_banks tool
-5. **Compliance Assessment**: First line is COMPLIANCE_DATA: JSON, then analysis below
+5. **Compliance Assessment**: Write clean 3-4 paragraph analysis ONLY - NO JSON output
 
-**CRITICAL**: For full reports and chat, NEVER include DATA: prefixes or raw JSON. Use tool data internally and write clean analysis only.
+**CRITICAL**: For ALL responses (reports, chat, compliance), NEVER include DATA: prefixes, COMPLIANCE_DATA: prefixes, or raw JSON. Use tool data internally and write clean professional analysis only.
 
-Example for full reports and chat:
+Example for all responses:
 # 📊 Full Financial Analysis Report - [Bank Name]
 
 ## Executive Summary
-[Professional analysis here - NO JSON, NO DATA: prefix]
+[Professional analysis here - NO JSON, NO DATA: prefix, NO COMPLIANCE_DATA: prefix]
 
-Example for compliance:
-COMPLIANCE_DATA: {"success": true, "overall_score": 87, "scores": {...}, "metrics": {...}}
-
-[Then provide your analysis]
+[For compliance questions, write 3-4 clean paragraphs analyzing the data - NO JSON output]
 
 Be professional and business-focused."""
 

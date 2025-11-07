@@ -630,7 +630,7 @@ IMPORTANT: Use get_local_document_data(s3_key="${doc.s3_key}", bank_name="${doc.
   },
 
   // Streaming for peer analytics
-  async streamPeerAnalysis(baseBank, peerBanks, metric, onChunk, onComplete, onError) {
+  async streamPeerAnalysis(baseBank, peerBanks, metric, onChunk, onComplete, onError, abortSignal = null) {
     console.log('[STREAMING] Starting peer analysis stream');
     const prompt = `Use the compare_banks tool with these exact parameters:
 - base_bank: "${baseBank}"
@@ -651,7 +651,8 @@ CRITICAL INSTRUCTIONS:
       const response = await fetch(`${BACKEND_URL}/api/invoke-agent-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputText: prompt })
+        body: JSON.stringify({ inputText: prompt }),
+        signal: abortSignal
       });
 
       if (!response.ok) {

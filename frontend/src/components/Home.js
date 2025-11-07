@@ -1,13 +1,16 @@
-import React from 'react';
-import { Typography, Box, Grid, Card, CardContent, Chip, Paper } from '@mui/material';
+import React, { useState } from 'react';
+import { Typography, Box, Grid, Card, CardContent, Chip, Paper, Button } from '@mui/material';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SecurityIcon from '@mui/icons-material/Security';
 import CloudIcon from '@mui/icons-material/Cloud';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
 function Home() {
+  const [showArch, setShowArch] = useState(false);
   const features = [
     {
       icon: <AnalyticsIcon sx={{ fontSize: 48, color: 'primary.main' }} />,
@@ -30,10 +33,10 @@ function Home() {
   ];
 
   const stats = [
-    { label: 'Banks Available', value: '500+', color: '#00778f' },
-    { label: 'Metrics Tracked', value: '6+', color: '#00a897' },
-    { label: 'Data Sources', value: '3', color: '#02c59b' },
-    { label: 'AI Tools', value: '20', color: '#A020F0' }
+    { label: 'Banks Available', value: '500+', color: '#146EB4' },
+    { label: 'Metrics Tracked', value: '6+', color: '#FF9900' },
+    { label: 'Data Sources', value: '3', color: '#146EB4' },
+    { label: 'AI Tools', value: '20', color: '#FF9900' }
   ];
 
   return (
@@ -42,7 +45,7 @@ function Home() {
       <Paper 
         elevation={0} 
         sx={{ 
-          background: 'linear-gradient(135deg, #A020F0 0%, #8B1A9B 50%, #6A1B9A 100%)',
+          background: 'linear-gradient(135deg, #146EB4 0%, #232F3E 100%)',
           color: 'white',
           p: 3,
           borderRadius: 2,
@@ -106,7 +109,7 @@ function Home() {
                 transition: 'all 0.3s ease',
                 '&:hover': { 
                   transform: 'translateY(-4px)', 
-                  boxShadow: '0 8px 16px rgba(160, 32, 240, 0.15)'
+                  boxShadow: '0 8px 16px rgba(255, 153, 0, 0.15)'
                 }
               }}
             >
@@ -132,8 +135,38 @@ function Home() {
         ))}
       </Grid>
 
+      {/* Architecture */}
+      <Box sx={{ mt: 4, textAlign: 'center' }}>
+        <Button 
+          onClick={() => setShowArch(!showArch)}
+          endIcon={showArch ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+          sx={{ mb: 2 }}
+        >
+          {showArch ? 'Hide' : 'Show'} AWS Architecture
+        </Button>
+        {showArch && (
+          <Box 
+            component="a" 
+            href="/bankiq_plus_agentcore_architecture.png" 
+            target="_blank"
+            sx={{ 
+              display: 'inline-block',
+              cursor: 'pointer',
+              transition: 'transform 0.2s',
+              '&:hover': { transform: 'scale(1.02)' }
+            }}
+          >
+            <img 
+              src="/bankiq_plus_agentcore_architecture.png" 
+              alt="BankIQ+ Architecture" 
+              style={{ maxWidth: '100%', height: 'auto', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+            />
+          </Box>
+        )}
+      </Box>
+
       {/* Technology Stack */}
-      <Box sx={{ mt: 6, p: 2, backgroundColor: '#f8f9fa', borderRadius: 2 }}>
+      <Box sx={{ mt: 4, p: 2, backgroundColor: '#f8f9fa', borderRadius: 2 }}>
         <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, textAlign: 'center', mb: 2 }}>
           Technology Stack
         </Typography>

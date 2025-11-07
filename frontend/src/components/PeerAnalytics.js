@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePersistedState } from '../hooks/usePersistedState';
 import {
   Box, Typography, Card, CardContent, Grid,
@@ -29,7 +29,9 @@ function PeerAnalytics() {
   const [hasQuarterly, setHasQuarterly] = usePersistedState('peer_hasQuarterly', false);
   const [dataLoaded, setDataLoaded] = usePersistedState('peer_dataLoaded', false);
   const [hasMonthly, setHasMonthly] = useState(false);
-  const [useStreaming, setUseStreaming] = useState(true); // Streaming toggle
+  const [useStreaming, setUseStreaming] = useState(true); // Streaming enabled
+  const abortControllerRef = useRef(null); // For canceling requests
+  const isAbortedRef = useRef(false); // Track if request was aborted
 
   const [bankSearchQuery, setBankSearchQuery] = useState('');
   const [bankSearchResults, setBankSearchResults] = useState([]);
@@ -96,7 +98,18 @@ function PeerAnalytics() {
   };
 
   const handleAnalysis = async () => {
-    if (!selectedBank || selectedPeers.length === 0 || !selectedMetric) return;
+    const missing = [];
+    if (!selectedBank) missing.push('base bank');
+    if (selectedPeers.length === 0) missing.push('at least one peer bank');
+    if (!selectedMetric) missing.push('metric');
+    
+    if (missing.length > 0) {
+      setError(`Please select: ${missing.join(', ')}`);
+      return;
+    }
+
+    // Reset abort flag FIRST
+    isAbortedRef.current = false;
 
     // Prevent multiple simultaneous requests
     if (loading) {
@@ -171,19 +184,28 @@ function PeerAnalytics() {
           if (useStreaming) {
             // Streaming mode for CSV
             setError('🔄 Analyzing CSV data (streaming)...');
+            abortControllerRef.current = new AbortController();
             await api.streamChat(
               prompt,
-              null, // no bank name needed
-              null, // no reports
-              false, // not RAG
-              null, // no CIK
+              null,
+              null,
+              false,
+              null,
               (chunk) => {
                 analysisText += chunk;
-                // Remove JSON from display in real-time (same as live mode)
-                let displayText = analysisText;
-                displayText = displayText.replace(/\{[^{}]*"data"\s*:\s*\[[^\]]*\][^{}]*\}/g, '');
-                displayText = displayText.replace(/\{[^{}]*"Bank"[^{}]*\}/g, '');
-                setAnalysis(displayText.trim() || 'Analyzing...');
+                // Filter out JSON lines but keep everything else
+                const lines = analysisText.split('\n');
+                const cleanLines = lines.filter(line => {
+                  const trimmed = line.trim();
+                  if (trimmed.startsWith('{') && (trimmed.includes('"data"') || trimmed.includes('"Bank"'))) {
+                    return false;
+                  }
+                  return true;
+                });
+                const displayText = cleanLines.join('\n').trim();
+                if (displayText && displayText.length > 20) {
+                  setAnalysis(displayText);
+                }
               },
               () => {
                 console.log('CSV analysis streaming complete');
@@ -233,8 +255,9 @@ function PeerAnalytics() {
         let streamingFailed = false;
         if (useStreaming) {
           // Streaming mode
-          setError('🔄 Analyzing (streaming)...');
+          // Don't show status message - loading spinner is enough
           let fullResponse = '';
+          abortControllerRef.current = new AbortController();
           
           try {
             await api.streamPeerAnalysis(
@@ -243,30 +266,55 @@ function PeerAnalytics() {
               selectedMetric,
               (chunk) => {
                 fullResponse += chunk;
-                // Update analysis in real-time (show partial response)
-                // Remove JSON from display (can be anywhere in the text)
-                let displayText = fullResponse;
-                // Remove complete JSON objects
-                displayText = displayText.replace(/\{[^{}]*"data"\s*:\s*\[[^\]]*\][^{}]*\}/g, '');
-                // Remove any remaining JSON-like structures
-                displayText = displayText.replace(/\{[^{}]*"Bank"[^{}]*\}/g, '');
-                setAnalysis(displayText.trim() || 'Analyzing...');
+                // Filter out JSON lines but keep everything else
+                const lines = fullResponse.split('\n');
+                const cleanLines = lines.filter(line => {
+                  const trimmed = line.trim();
+                  // Skip lines that are JSON objects with data
+                  if (trimmed.startsWith('{') && (trimmed.includes('"data"') || trimmed.includes('"Bank"'))) {
+                    return false;
+                  }
+                  return true;
+                });
+                const displayText = cleanLines.join('\n').trim();
+                if (displayText && displayText.length > 20) {
+                  setAnalysis(displayText);
+                }
               },
               () => {
-                // On complete - DON'T clean up yet, let parsing happen first
+                if (isAbortedRef.current) return;
                 console.log('Peer analysis streaming complete');
-                // Keep fullResponse as-is with JSON for parsing below
                 setError('');
               },
               (error) => {
                 console.log('Streaming failed:', error);
                 streamingFailed = true;
-              }
+              },
+              abortControllerRef.current?.signal
             );
             
-            // If streaming succeeded, use the response
+            // If streaming succeeded, parse the response
             if (!streamingFailed && fullResponse) {
-              result = { analysis: fullResponse, data: [] };
+              // Parse JSON and analysis from fullResponse
+              let chartData = [];
+              let analysisText = fullResponse;
+              
+              // Extract JSON data
+              const lines = fullResponse.split('\n');
+              for (const line of lines) {
+                if (line.trim().startsWith('{')) {
+                  try {
+                    const parsed = JSON.parse(line.trim());
+                    if (parsed.data && Array.isArray(parsed.data)) {
+                      chartData = parsed.data;
+                      analysisText = lines.filter(l => l !== line).join('\n').trim();
+                      break;
+                    }
+                  } catch (e) {}
+                }
+              }
+              
+              result = { analysis: analysisText, data: chartData };
             } else {
               streamingFailed = true;
             }
@@ -278,14 +326,17 @@ function PeerAnalytics() {
         
         // Fall back to polling if streaming is off or failed
         if (!useStreaming || streamingFailed) {
-          if (streamingFailed) {
-            setError('⚠️ Streaming timed out, using polling mode...');
-          }
           const response = await api.analyzePeers(apiBaseBank, apiPeerBanks, selectedMetric);
           result = response.success ? response.result : response;
         }
       }
 
+      // Check if aborted before processing results
+      if (isAbortedRef.current) {
+        console.log('Request was aborted, stopping processing');
+        return;
+      }
+      
       // Parse analysis text and extract data from agent response
       let analysisText = result.analysis || result || '';
       let chartDataFromResponse = result.data || [];
@@ -549,12 +600,13 @@ function PeerAnalytics() {
                 <InputLabel shrink>Base Bank</InputLabel>
                 <input
                   type="text"
-                  value={bankSearchQuery}
+                  value={selectedBank || bankSearchQuery}
                   onChange={(e) => {
-                    setBankSearchQuery(e.target.value);
-                    searchBanks(e.target.value);
+                    const val = e.target.value;
+                    setBankSearchQuery(val);
+                    setSelectedBank('');
+                    searchBanks(val);
                   }}
-                  onFocus={() => bankSearchQuery.length >= 2 && searchBanks(bankSearchQuery)}
                   placeholder="Search bank name..."
                   style={{
                     width: '100%',
@@ -572,7 +624,7 @@ function PeerAnalytics() {
                         key={bank.cik}
                         onClick={() => {
                           setSelectedBank(bank.name);
-                          setBankSearchQuery(bank.name);
+                          setBankSearchQuery('');
                           setBankSearchResults([]);
                         }}
                       >
@@ -580,11 +632,6 @@ function PeerAnalytics() {
                       </MenuItem>
                     ))}
                   </Paper>
-                )}
-                {selectedBank && (
-                  <Typography variant="caption" sx={{ mt: 0.5, display: 'block', color: 'success.main' }}>
-                    ✓ {selectedBank}
-                  </Typography>
                 )}
               </>
             ) : (
@@ -628,7 +675,7 @@ function PeerAnalytics() {
                 />
                 {peerSearchResults.length > 0 && (
                   <Paper sx={{ position: 'absolute', zIndex: 1000, width: '100%', maxHeight: 200, overflow: 'auto', mt: 8 }}>
-                    {peerSearchResults.map((bank) => (
+                    {peerSearchResults.filter(bank => bank.name !== selectedBank).map((bank) => (
                       <MenuItem
                         key={bank.cik}
                         onClick={() => {
@@ -736,32 +783,25 @@ function PeerAnalytics() {
             variant="contained"
             fullWidth
             sx={{ height: 56 }}
-            disabled={!selectedBank || selectedPeers.length === 0 || !selectedMetric || loading}
+            disabled={loading}
             onClick={handleAnalysis}
           >
             {loading ? <CircularProgress size={24} /> : 'Analyze'}
           </Button>
         </Grid>
-        <Grid item xs={12} md={1}>
-          <FormControlLabel
-            control={
-              <Switch 
-                checked={useStreaming} 
-                onChange={(e) => setUseStreaming(e.target.checked)}
-                disabled={loading}
-                size="small"
-              />
-            }
-            label={<Typography variant="caption">Stream {useStreaming ? '⚡' : ''}</Typography>}
-            sx={{ height: 56, display: 'flex', justifyContent: 'center' }}
-          />
-        </Grid>
+
         <Grid item xs={12} md={1}>
           <Button
             variant="outlined"
             fullWidth
             sx={{ height: 56 }}
             onClick={() => {
+              isAbortedRef.current = true;
+              if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+              }
+              setLoading(false);
               setSelectedBank('');
               setSelectedPeers([]);
               setSelectedMetric('');
@@ -772,6 +812,10 @@ function PeerAnalytics() {
               setUploadedData(null);
               setUploadedBanks([]);
               setUploadedMetrics([]);
+              setBankSearchQuery('');
+              setPeerSearchQuery('');
+              setBankSearchResults([]);
+              setPeerSearchResults([]);
             }}
           >
             Reset
