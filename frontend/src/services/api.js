@@ -680,9 +680,11 @@ CRITICAL INSTRUCTIONS:
               if (data.chunk) {
                 onChunk(data.chunk);
               } else if (data.done) {
+                clearTimeout(timeoutId);
                 onComplete();
                 return;
               } else if (data.error) {
+                clearTimeout(timeoutId);
                 onError(data.error);
                 return;
               }

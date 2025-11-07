@@ -21,7 +21,7 @@ agents:
     bedrock_agentcore:
       agent_id: bank_iq_agent-2Tb9zq62O4
       agent_arn: arn:aws:bedrock-agentcore:us-east-1:164543933824:runtime/bank_iq_agent-2Tb9zq62O4
-      agent_session_id: null
+      agent_session_id: 30266008-e1f1-4dc4-a755-2ab28f3dcbe4
     codebuild:
       project_name: bedrock-agentcore-bank_iq_agent-builder
       execution_role: arn:aws:iam::164543933824:role/AmazonBedrockAgentCoreSDKCodeBuild-us-east-1-ddce657011

@@ -530,12 +530,56 @@ async function invokeAgent(req, res) {
 }
 
 // Store CSV data endpoint (for local mode)
-app.post('/api/store-csv-data', (req, res) => {
-  const { data, filename } = req.body;
-  console.log(`[${new Date().toISOString()}] Stored CSV data: ${filename} (${data.length} rows)`);
-  // In production, you'd store this in a database or S3
-  // For now, just acknowledge receipt
-  res.json({ success: true, message: 'CSV data received', rows: data.length });
+app.post('/api/upload-csv', async (req, res) => {
+  const { csvContent, filename } = req.body;
+  console.log(`[${new Date().toISOString()}] Uploading CSV to S3: ${filename}`);
+  
+  try {
+    const result = await invokeAgent({
+      prompt: `Use upload_peer_csv_data tool to upload this CSV file. CSV content: ${csvContent}. Filename: ${filename}`,
+      sessionId: `csv-upload-${Date.now()}`
+    });
+    
+    // Extract S3 key from agent response
+    const s3KeyMatch = result.match(/"s3_key"\s*:\s*"([^"]+)"/);
+    if (s3KeyMatch) {
+      res.json({ success: true, s3_key: s3KeyMatch[1], filename });
+    } else {
+      res.json({ success: false, error: 'Failed to extract S3 key' });
+    }
+  } catch (error) {
+    console.error('CSV upload error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/get-csv-from-s3', async (req, res) => {
+  const { s3Key } = req.body;
+  console.log(`[${new Date().toISOString()}] Fetching CSV from S3: ${s3Key}`);
+  
+  try {
+    const s3 = new AWS.S3();
+    const bucket = process.env.UPLOADED_DOCS_BUCKET || 'bankiq-uploaded-docs-164543933824-prod';
+    const result = await s3.getObject({ Bucket: bucket, Key: s3Key }).promise();
+    const csvContent = result.Body.toString('utf-8');
+    
+    // Parse CSV to JSON
+    const lines = csvContent.split('\n');
+    const headers = lines[0].split(',');
+    const data = lines.slice(1).filter(line => line.trim()).map(line => {
+      const values = line.split(',');
+      const obj = {};
+      headers.forEach((header, i) => {
+        obj[header.trim()] = values[i]?.trim();
+      });
+      return obj;
+    });
+    
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('CSV fetch error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Analyze local CSV data endpoint (auth handled by frontend)

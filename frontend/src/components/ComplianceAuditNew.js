@@ -87,16 +87,16 @@ const ComplianceAudit = () => {
   const useStreaming = true; // Always use streaming
 
   const popularBanks = {
-    "JPMORGAN CHASE & CO": "0000019617",
-    "BANK OF AMERICA CORP": "0000070858",
-    "WELLS FARGO & COMPANY": "0000072971",
-    "CITIGROUP INC": "0000831001",
-    "GOLDMAN SACHS GROUP INC": "0000886982",
+    "JPMORGAN CHASE BANK": "0000019617",
+    "BANK OF AMERICA": "0000070858",
+    "WELLS FARGO BANK": "0000072971",
+    "CITIBANK": "0000831001",
+    "GOLDMAN SACHS BANK": "0000886982",
     "MORGAN STANLEY": "0000895421",
-    "U.S. BANCORP": "0000036104",
-    "PNC FINANCIAL SERVICES GROUP INC": "0000713676",
-    "CAPITAL ONE FINANCIAL CORP": "0000927628",
-    "TRUIST FINANCIAL CORP": "0001534701"
+    "U.S. BANK": "0000036104",
+    "PNC BANK": "0000713676",
+    "CAPITAL ONE": "0000927628",
+    "TRUIST BANK": "0001534701"
   };
 
   const handleBankSearch = async () => {
@@ -130,17 +130,7 @@ const ComplianceAudit = () => {
 
   // Reset function
   const handleReset = () => {
-    setSelectedBank('');
-    setSelectedBankCik(null);
-    setSearchBank('');
-    setSearchResults([]);
-    setComplianceData(null);
-    setAuditResults(null);
-    setDataSource('');
-    setAiAnalysis('');
-    setAlerts([
-      { type: 'info', message: 'Ready for new compliance assessment', timestamp: 'Just now' }
-    ]);
+    window.location.reload();
   };
 
   // Handle AI Analysis with async job pattern
@@ -170,9 +160,13 @@ const ComplianceAudit = () => {
           selectedBankCik,
           (chunk) => {
             analysisText += chunk;
-            // Filter out agent thinking and JSON
-            let displayText = analysisText;
-            const lines = displayText.split('\n');
+            
+            // Decode and show in real-time
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = analysisText;
+            const decoded = textarea.value;
+            
+            const lines = decoded.split('\n');
             const cleanLines = lines.filter(line => {
               const trimmed = line.trim();
               return !trimmed.startsWith('COMPLIANCE_DATA:') && 
@@ -183,14 +177,41 @@ const ComplianceAudit = () => {
                      !trimmed.startsWith('I\'ll provide') &&
                      !trimmed.startsWith('I\'ll use');
             });
-            displayText = cleanLines.join('\n').trim();
-            // Only show if we have actual analysis (starts with #)
-            if (displayText.includes('# ')) {
+            const displayText = cleanLines.join('\n').trim();
+            
+            if (displayText.length > 50) {
               setAiAnalysis(displayText);
             }
           },
           () => {
             console.log('AI Analysis streaming complete');
+            
+            // Decode HTML entities
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = analysisText;
+            const decoded = textarea.value;
+            
+            // Filter out agent thinking and JSON
+            const lines = decoded.split('\n');
+            const cleanLines = lines.filter(line => {
+              const trimmed = line.trim();
+              return !trimmed.startsWith('COMPLIANCE_DATA:') && 
+                     !trimmed.startsWith('{') && 
+                     !trimmed.startsWith('}') &&
+                     !trimmed.includes('"risk_gauges"') &&
+                     !trimmed.includes('"metrics"') &&
+                     !trimmed.startsWith('I\'ll provide') &&
+                     !trimmed.startsWith('I\'ll use');
+            });
+            const displayText = cleanLines.join('\n').trim();
+            
+            console.log('AI Analysis complete, length:', displayText.length);
+            if (displayText.length > 50) {
+              setAiAnalysis(displayText);
+            } else {
+              console.warn('AI Analysis too short or empty:', displayText);
+            }
+            
             setAlerts(prev => [{
               type: 'success',
               message: 'AI compliance analysis completed',
@@ -405,16 +426,21 @@ const ComplianceAudit = () => {
         throw { message: 'No response data' };
       }
       
+      // Decode HTML entities FIRST
+      const textarea = document.createElement('textarea');
+      textarea.innerHTML = responseText;
+      const decodedResponse = textarea.value;
+      
       // Parse compliance assessment from agent
       let complianceResult = null;
       
       try {
         // Extract JSON from response (may have text before/after)
-        const jsonMatch = responseText.match(/\{[\s\S]*"success"[\s\S]*\}/);        
+        const jsonMatch = decodedResponse.match(/\{[\s\S]*"success"[\s\S]*\}/);        
         if (jsonMatch) {
           complianceResult = JSON.parse(jsonMatch[0]);
         } else {
-          complianceResult = JSON.parse(responseText);
+          complianceResult = JSON.parse(decodedResponse);
         }
         
         console.log('Parsed compliance result:', complianceResult);
@@ -813,46 +839,44 @@ const ComplianceAudit = () => {
               </Box>
             ) : (
               <Box>
-                {/* Executive Summary Card */}
-                <Card sx={{ mb: 3, background: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)', color: 'white' }}>
-                  <CardContent>
-                    <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
-                      <Assessment sx={{ mr: 1 }} /> Executive Summary
-                    </Typography>
-                    <Typography variant="body1" sx={{ lineHeight: 1.8, opacity: 0.95 }}>
-                      {(() => {
-                        let cleanText = aiAnalysis;
-                        // Remove JSON blocks
-                        if (cleanText.includes('{') && cleanText.includes('"success"')) {
-                          let startIdx = cleanText.indexOf('{');
-                          let braceCount = 0;
-                          let endIdx = startIdx;
-                          for (let i = startIdx; i < cleanText.length; i++) {
-                            if (cleanText[i] === '{') braceCount++;
-                            if (cleanText[i] === '}') braceCount--;
-                            if (braceCount === 0) {
-                              endIdx = i + 1;
-                              break;
-                            }
-                          }
-                          cleanText = cleanText.substring(endIdx).trim();
-                        }
-                        // Remove agent thinking
-                        cleanText = cleanText.replace(/^I'll provide.*?\n\n/s, '');
-                        cleanText = cleanText.replace(/^I'll use.*?\n\n/s, '');
-                        // Extract first paragraph after title
-                        if (cleanText.includes('## ')) {
-                          return cleanText.split('## ')[0].replace(/^# .*?\n\n/, '').split('\n\n')[0];
-                        }
-                        const paragraphs = cleanText.split('\n\n').filter(p => p.trim().length > 50 && !p.startsWith('I\'ll'));
-                        return paragraphs[0] || 'AI analysis completed successfully.';
-                      })()}
-                    </Typography>
-                  </CardContent>
-                </Card>
+                {(() => {
+                  // Decode HTML entities ONCE for entire analysis
+                  const textarea = document.createElement('textarea');
+                  textarea.innerHTML = aiAnalysis;
+                  const decodedAnalysis = textarea.value;
+                  
+                  return (
+                    <>
+                      {/* Executive Summary Card */}
+                      <Card sx={{ mb: 3, background: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)', color: 'white' }}>
+                        <CardContent>
+                          <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
+                            <Assessment sx={{ mr: 1 }} /> Executive Summary
+                          </Typography>
+                          <Typography variant="body1" sx={{ lineHeight: 1.8, opacity: 0.95 }}>
+                            {(() => {
+                              const beforeSections = decodedAnalysis.split('## ')[0].replace(/^# .*?\n\n/, '');
+                              const paragraphs = beforeSections.split('\n\n').filter(p => {
+                                const trimmed = p.trim();
+                                return trimmed.length > 50 && !trimmed.startsWith('I\'ll');
+                              });
+                              if (paragraphs[0]) return paragraphs[0];
+                              
+                              // If no content before sections, use first section's first paragraph
+                              const sections = decodedAnalysis.split('## ').slice(1);
+                              if (sections.length > 0) {
+                                const firstSection = sections[0].split('\n\n');
+                                const content = firstSection.slice(1).find(p => p.trim().length > 50);
+                                return content || firstSection[1] || 'AI analysis completed successfully.';
+                              }
+                              return 'AI analysis completed successfully.';
+                            })()}
+                          </Typography>
+                        </CardContent>
+                      </Card>
 
-                {/* Key Metrics Grid */}
-                {complianceData && (
+                      {/* Key Metrics Grid */}
+                      {complianceData && (
                   <Grid container spacing={2} sx={{ mb: 3 }}>
                     <Grid item xs={12} md={3}>
                       <Card sx={{ textAlign: 'center', p: 2, bgcolor: '#fef3c7', border: '2px solid #f59e0b' }}>
@@ -878,67 +902,75 @@ const ComplianceAudit = () => {
                         <Typography variant="body2" sx={{ color: '#3730a3' }}>ROA</Typography>
                       </Card>
                     </Grid>
-                  </Grid>
-                )}
-
-                {/* Key Insights - Professional Business Style */}
-                <Grid container spacing={2}>
-                  {(() => {
-                    let cleanAnalysis = aiAnalysis.replace(/^I'll provide.*?\n\n/s, '').replace(/^I'll use.*?\n\n/s, '');
-                    const sections = cleanAnalysis.includes('## ') ? cleanAnalysis.split('## ').slice(1) : [cleanAnalysis];
-                    const insights = sections.slice(0, 4).map((section, index) => {
-                      const [title, ...content] = cleanAnalysis.includes('## ') ? section.split('\n\n') : [`Key Insight ${index + 1}`, section];
-                      const contentText = content.join(' ').split('.').slice(0, 2).join('.') + '.';
-                      return { title: title.trim(), content: contentText.trim() };
-                    });
-                    
-                    const colors = [
-                      { bg: '#f8fafc', border: '#0ea5e9', icon: '#0284c7' },
-                      { bg: '#fefce8', border: '#eab308', icon: '#ca8a04' },
-                      { bg: '#f0fdf4', border: '#22c55e', icon: '#16a34a' },
-                      { bg: '#fef2f2', border: '#ef4444', icon: '#dc2626' }
-                    ];
-                    
-                    return insights.map((insight, index) => (
-                      <Grid item xs={12} md={6} key={index}>
-                        <Card sx={{ 
-                          height: '100%',
-                          bgcolor: colors[index].bg,
-                          borderLeft: `4px solid ${colors[index].border}`,
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                        }}>
-                          <CardContent sx={{ p: 2 }}>
-                            <Typography 
-                              variant="subtitle2" 
-                              sx={{ 
-                                color: colors[index].icon,
-                                fontWeight: 600,
-                                mb: 1,
-                                textTransform: 'uppercase',
-                                fontSize: '0.75rem',
-                                letterSpacing: '0.5px'
-                              }}
-                            >
-                              {insight.title}
-                            </Typography>
-                            <Typography 
-                              variant="body2" 
-                              sx={{ 
-                                color: '#475569',
-                                lineHeight: 1.5,
-                                fontSize: '0.875rem'
-                              }}
-                            >
-                              {insight.content}
-                            </Typography>
-                          </CardContent>
-                        </Card>
                       </Grid>
-                    ));
-                  })()}
-                </Grid>
+                      )}
 
-
+                      {/* Key Insights - Professional Business Style */}
+                      <Grid container spacing={2}>
+                        {(() => {
+                          let cleanAnalysis = decodedAnalysis.replace(/^I'll provide.*?\n\n/s, '').replace(/^I'll use.*?\n\n/s, '');
+                          const sections = cleanAnalysis.includes('## ') ? cleanAnalysis.split('## ').slice(1) : [];
+                          
+                          // If no sections, split by paragraphs
+                          const insights = sections.length > 0 ? sections.slice(0, 4).map((section, index) => {
+                            const [title, ...content] = section.split('\n\n');
+                            const contentText = content.join(' ').split('.').slice(0, 2).join('.') + '.';
+                            return { title: title.trim(), content: contentText.trim() };
+                          }) : cleanAnalysis.split('\n\n').filter(p => p.trim().length > 100 && !p.startsWith('I\'ll') && !p.startsWith('#')).slice(0, 4).map((para, index) => {
+                            const sentences = para.split('.');
+                            const title = sentences[0].substring(0, 50) + '...';
+                            const content = sentences.slice(0, 2).join('.') + '.';
+                            return { title, content };
+                          });
+                          
+                          const colors = [
+                            { bg: '#f8fafc', border: '#0ea5e9', icon: '#0284c7' },
+                            { bg: '#fefce8', border: '#eab308', icon: '#ca8a04' },
+                            { bg: '#f0fdf4', border: '#22c55e', icon: '#16a34a' },
+                            { bg: '#fef2f2', border: '#ef4444', icon: '#dc2626' }
+                          ];
+                          
+                          return insights.map((insight, index) => (
+                            <Grid item xs={12} md={6} key={index}>
+                              <Card sx={{ 
+                                height: '100%',
+                                bgcolor: colors[index].bg,
+                                borderLeft: `4px solid ${colors[index].border}`,
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                              }}>
+                                <CardContent sx={{ p: 2 }}>
+                                  <Typography 
+                                    variant="subtitle2" 
+                                    sx={{ 
+                                      color: colors[index].icon,
+                                      fontWeight: 600,
+                                      mb: 1,
+                                      textTransform: 'uppercase',
+                                      fontSize: '0.75rem',
+                                      letterSpacing: '0.5px'
+                                    }}
+                                  >
+                                    {insight.title}
+                                  </Typography>
+                                  <Typography 
+                                    variant="body2" 
+                                    sx={{ 
+                                      color: '#475569',
+                                      lineHeight: 1.5,
+                                      fontSize: '0.875rem'
+                                    }}
+                                  >
+                                    {insight.content}
+                                  </Typography>
+                                </CardContent>
+                              </Card>
+                            </Grid>
+                          ));
+                        })()}
+                      </Grid>
+                    </>
+                  );
+                })()}
               </Box>
             )}
           </CardContent>

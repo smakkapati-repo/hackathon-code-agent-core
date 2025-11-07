@@ -106,35 +106,9 @@ def search_fdic_bank(bank_name: str) -> str:
         bank_name: Bank name to search for (e.g., "Regions Financial", "JPMorgan")
     
     Returns: CERT number and official name of the largest matching bank
-    Use when: Need CERT number for banks not in hardcoded list
+    Use when: Need CERT number for any bank
     Examples: "Find CERT for Regional Bank", "What's the CERT for XYZ Bank"""
     try:
-        # Hardcoded CERT numbers for top 10 banks (instant lookup)
-        top_banks_cert = {
-            'JPMORGAN': {'cert': '628', 'name': 'JPMorgan Chase Bank'},
-            'BANK OF AMERICA': {'cert': '3510', 'name': 'Bank of America'},
-            'WELLS FARGO': {'cert': '3511', 'name': 'Wells Fargo Bank'},
-            'CITIGROUP': {'cert': '7213', 'name': 'Citibank'},
-            'CITIBANK': {'cert': '7213', 'name': 'Citibank'},
-            'GOLDMAN SACHS': {'cert': '32992', 'name': 'Morgan Stanley Bank'},
-            'MORGAN STANLEY': {'cert': '32992', 'name': 'Morgan Stanley Bank'},
-            'U.S. BANCORP': {'cert': '6548', 'name': 'U.S. Bank'},
-            'PNC': {'cert': '6384', 'name': 'PNC Bank'},
-            'CAPITAL ONE': {'cert': '33954', 'name': 'Capital One'},
-            'TRUIST': {'cert': '11069', 'name': 'Truist Bank'}
-        }
-        
-        # Check hardcoded list first
-        bank_upper = bank_name.upper()
-        for key, value in top_banks_cert.items():
-            if key in bank_upper:
-                return json.dumps({
-                    "success": True,
-                    "cert": value['cert'],
-                    "name": value['name'],
-                    "asset": 0
-                })
-        
         # Extract core bank name (first significant word)
         words = bank_name.upper().split()
         # Remove common corporate suffixes
@@ -1440,7 +1414,8 @@ MODE-SPECIFIC DATA TOOLS:
 **COMPLIANCE TOOLS** (work in all modes):
 - compliance_risk_assessment + regulatory_alerts_monitor: Use together for comprehensive analysis
 - audit_document_analyzer: For uploaded documents
-- CRITICAL: Use tool data internally, write clean 3-4 paragraph analysis - NO JSON output
+- CRITICAL: Use tool data internally, write analysis with markdown sections
+- FORMAT: Always use ## headers for sections (e.g., ## Executive Risk Assessment, ## Capital Adequacy, ## Liquidity Coverage, ## Risk Mitigation Strategies)
 
 IMPORTANT INSTRUCTIONS FOR PEER ANALYSIS:
 1. When using compare_banks or analyze_csv_peer_performance:

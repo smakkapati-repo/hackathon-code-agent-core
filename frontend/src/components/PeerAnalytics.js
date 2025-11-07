@@ -179,156 +179,182 @@ function PeerAnalytics() {
         const prompt = `Analyze peer banking performance for ${selectedMetric}:\n\nBase Bank: ${apiBaseBank}\nPeer Banks: ${apiPeerBanks.join(', ')}\n\nData shows ${longFormatData.length} quarterly data points. Provide a concise 2-paragraph analysis comparing ${apiBaseBank}'s performance against peers on ${selectedMetric}, highlighting key trends and competitive positioning.`;
 
         try {
-          let analysisText = '';
+          let rawResponse = '';     // For data extraction
+          let cleanResponse = '';   // For display only
           
-          if (useStreaming) {
-            // Streaming mode for CSV
-            setError('🔄 Analyzing CSV data (streaming)...');
-            abortControllerRef.current = new AbortController();
-            await api.streamChat(
-              prompt,
-              null,
-              null,
-              false,
-              null,
-              (chunk) => {
-                analysisText += chunk;
-                // Filter out JSON lines but keep everything else
-                const lines = analysisText.split('\n');
-                const cleanLines = lines.filter(line => {
-                  const trimmed = line.trim();
-                  if (trimmed.startsWith('{') && (trimmed.includes('"data"') || trimmed.includes('"Bank"'))) {
-                    return false;
-                  }
-                  return true;
-                });
-                const displayText = cleanLines.join('\n').trim();
-                if (displayText && displayText.length > 20) {
-                  setAnalysis(displayText);
+          setError('🔄 Analyzing CSV data...');
+          abortControllerRef.current = new AbortController();
+          await api.streamChat(
+            prompt,
+            null,
+            null,
+            false,
+            null,
+            (chunk) => {
+              rawResponse += chunk;  // Keep EVERYTHING for data extraction
+              
+              // Build clean display independently - same as live mode
+              const currentText = rawResponse;
+              const lines = currentText.split('\n');
+              
+              // Find where analysis starts (after JSON line)
+              let analysisStartIndex = 0;
+              for (let i = 0; i < lines.length; i++) {
+                const trimmed = lines[i].trim();
+                // Skip first line if it's JSON
+                if (i === 0 && trimmed.startsWith('{') && trimmed.includes('"data"')) {
+                  analysisStartIndex = 1;
+                  break;
                 }
-              },
-              () => {
-                console.log('CSV analysis streaming complete');
-                setError('');
-              },
-              (error) => {
-                console.log('CSV streaming failed:', error);
-                throw new Error(error);
               }
-            );
-          } else {
-            // Polling mode for CSV
-            const job = await api.submitJob(prompt);
-            const jobResult = await api.pollJobUntilComplete(job.jobId);
-            analysisText = jobResult.result || 'Analysis completed.';
-          }
-
-          // Remove any JSON structures from the analysis
-          try {
-            // Find and remove complete JSON object from tool
-            const jsonPattern = /\{[^]*?"data"\s*:\s*\[[^]*?\][^]*?"base_bank"[^]*?"peer_banks"[^]*?"analysis"[^]*?"source"[^]*?\}/;
-            const match = analysisText.match(jsonPattern);
-
-            if (match) {
-              // Remove the JSON, keep everything after it
-              const jsonEndIndex = analysisText.indexOf(match[0]) + match[0].length;
-              analysisText = analysisText.substring(jsonEndIndex).trim();
+              
+              // Get analysis lines only (skip JSON and preambles)
+              const analysisLines = lines.slice(analysisStartIndex).filter(line => {
+                const trimmed = line.trim();
+                // Skip empty lines at start
+                if (!trimmed) return false;
+                // Skip "I'll" preambles
+                if (trimmed.startsWith('I\'ll')) return false;
+                return true;
+              });
+              
+              cleanResponse = analysisLines.join('\n').trim();
+              
+              if (cleanResponse.length > 50) {
+                setAnalysis(cleanResponse);
+              }
+            },
+            () => {
+              console.log('CSV analysis streaming complete');
+              setError('');
+            },
+            (error) => {
+              console.log('CSV streaming failed:', error);
+              throw new Error(error);
             }
+          );
 
-            // Clean up any remaining JSON fragments
-            if (analysisText.includes('"Bank"')) {
-              analysisText = analysisText.replace(/\{[^}]*"Bank"\s*:\s*"[^"]*"[^}]*\}[,\s]*/g, '');
-              analysisText = analysisText.replace(/^\s*\[|\]\s*$/g, '');
-              analysisText = analysisText.trim();
-            }
-          } catch (e) {
-            console.log('Could not clean CSV analysis:', e.message);
-          }
-
-          result = { data: longFormatData, analysis: analysisText };
+          result = { data: longFormatData, analysis: cleanResponse };
         } catch (err) {
           console.error('CSV analysis error:', err);
           result = { data: longFormatData, analysis: `**${selectedMetric} Analysis**\n\nShowing data visualization for uploaded CSV data comparing ${apiBaseBank} against ${apiPeerBanks.join(', ')}.` };
         }
       } else {
-        // Live mode - use streaming or polling based on toggle
-        let streamingFailed = false;
-        if (useStreaming) {
-          // Streaming mode
-          // Don't show status message - loading spinner is enough
-          let fullResponse = '';
-          abortControllerRef.current = new AbortController();
-          
-          try {
-            await api.streamPeerAnalysis(
-              apiBaseBank,
-              apiPeerBanks,
-              selectedMetric,
-              (chunk) => {
-                fullResponse += chunk;
-                // Filter out JSON lines but keep everything else
-                const lines = fullResponse.split('\n');
-                const cleanLines = lines.filter(line => {
-                  const trimmed = line.trim();
-                  // Skip lines that are JSON objects with data
-                  if (trimmed.startsWith('{') && (trimmed.includes('"data"') || trimmed.includes('"Bank"'))) {
-                    return false;
-                  }
-                  return true;
-                });
-                const displayText = cleanLines.join('\n').trim();
-                if (displayText && displayText.length > 20) {
-                  setAnalysis(displayText);
-                }
-              },
-              () => {
-                if (isAbortedRef.current) return;
-                console.log('Peer analysis streaming complete');
-                setError('');
-              },
-              (error) => {
-                console.log('Streaming failed:', error);
-                streamingFailed = true;
-              },
-              abortControllerRef.current?.signal
-            );
+        // Live mode - streaming only
+        let rawResponse = '';     // For data extraction only
+        let cleanResponse = '';   // For display only
+        abortControllerRef.current = new AbortController();
+        
+        await api.streamPeerAnalysis(
+          apiBaseBank,
+          apiPeerBanks,
+          selectedMetric,
+          (chunk) => {
+            rawResponse += chunk;  // Keep EVERYTHING for data extraction
             
-            // If streaming succeeded, parse the response
-            if (!streamingFailed && fullResponse) {
-              // Parse JSON and analysis from fullResponse
-              let chartData = [];
-              let analysisText = fullResponse;
-              
-              // Extract JSON data
-              const lines = fullResponse.split('\n');
-              for (const line of lines) {
-                if (line.trim().startsWith('{')) {
-                  try {
-                    const parsed = JSON.parse(line.trim());
-                    if (parsed.data && Array.isArray(parsed.data)) {
-                      chartData = parsed.data;
-                      analysisText = lines.filter(l => l !== line).join('\n').trim();
-                      break;
-                    }
-                  } catch (e) {}
-                }
+            // Build clean display independently - only show analysis text
+            // Don't filter rawResponse, build cleanResponse from scratch
+            const currentText = rawResponse;
+            const lines = currentText.split('\n');
+            
+            // Find where analysis starts (after JSON line)
+            let analysisStartIndex = 0;
+            for (let i = 0; i < lines.length; i++) {
+              const trimmed = lines[i].trim();
+              // Skip first line if it's JSON
+              if (i === 0 && trimmed.startsWith('{') && trimmed.includes('"data"')) {
+                analysisStartIndex = 1;
+                break;
               }
-              
-              result = { analysis: analysisText, data: chartData };
-            } else {
-              streamingFailed = true;
             }
-          } catch (err) {
-            console.log('Streaming error:', err);
-            streamingFailed = true;
+            
+            // Get analysis lines only (skip JSON and preambles)
+            const analysisLines = lines.slice(analysisStartIndex).filter(line => {
+              const trimmed = line.trim();
+              // Skip empty lines at start
+              if (!trimmed) return false;
+              // Skip "I'll" preambles
+              if (trimmed.startsWith('I\'ll')) return false;
+              return true;
+            });
+            
+            cleanResponse = analysisLines.join('\n').trim();
+            
+            if (cleanResponse.length > 50) {
+              setAnalysis(cleanResponse);
+            }
+          },
+          () => {
+            if (isAbortedRef.current) return;
+            console.log('Streaming complete');
+            setError('');
+          },
+          (error) => {
+            console.error('Streaming error:', error);
+          },
+          abortControllerRef.current?.signal
+        );
+        
+        // Extract data from rawResponse (with HTML decoding)
+        let chartData = [];
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = rawResponse;
+        const decoded = textarea.value;
+        
+        console.log('Raw response length:', rawResponse.length);
+        console.log('First 1000 chars:', decoded.substring(0, 1000));
+        
+        // Pattern 1: Look for JSON on first line (agent instruction format)
+        const lines = decoded.split('\n');
+        const firstLine = lines[0]?.trim();
+        if (firstLine && firstLine.startsWith('{') && firstLine.includes('"data"')) {
+          try {
+            const parsed = JSON.parse(firstLine);
+            if (parsed.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
+              console.log('✓ Found data on first line:', parsed.data.length, 'records');
+              chartData = parsed.data;
+            }
+          } catch (e) {
+            console.log('First line parse error:', e.message);
           }
         }
         
-        // Fall back to polling if streaming is off or failed
-        if (!useStreaming || streamingFailed) {
-          const response = await api.analyzePeers(apiBaseBank, apiPeerBanks, selectedMetric);
-          result = response.success ? response.result : response;
+        // Pattern 2: Look for JSON anywhere in first 5 lines
+        if (chartData.length === 0) {
+          for (let i = 0; i < Math.min(5, lines.length); i++) {
+            const line = lines[i]?.trim();
+            if (line && line.startsWith('{') && line.includes('"data"')) {
+              try {
+                const parsed = JSON.parse(line);
+                if (parsed.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
+                  console.log(`✓ Found data on line ${i+1}:`, parsed.data.length, 'records');
+                  chartData = parsed.data;
+                  break;
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          }
         }
+        
+        // Pattern 3: Try regex as last resort
+        if (chartData.length === 0) {
+          const jsonMatch = decoded.match(/\{"data"\s*:\s*\[[^\]]+\][^}]*\}/);
+          if (jsonMatch) {
+            try {
+              const parsed = JSON.parse(jsonMatch[0]);
+              if (parsed.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
+                console.log('✓ Found data via regex:', parsed.data.length, 'records');
+                chartData = parsed.data;
+              }
+            } catch (e) {
+              console.log('Regex parse error:', e.message);
+            }
+          }
+        }
+        
+        result = { analysis: cleanResponse, data: chartData };
       }
 
       // Check if aborted before processing results
@@ -795,28 +821,7 @@ function PeerAnalytics() {
             variant="outlined"
             fullWidth
             sx={{ height: 56 }}
-            onClick={() => {
-              isAbortedRef.current = true;
-              if (abortControllerRef.current) {
-                abortControllerRef.current.abort();
-                abortControllerRef.current = null;
-              }
-              setLoading(false);
-              setSelectedBank('');
-              setSelectedPeers([]);
-              setSelectedMetric('');
-              setAnalysis('');
-              setChartData([]);
-              setRawApiData([]);
-              setError('');
-              setUploadedData(null);
-              setUploadedBanks([]);
-              setUploadedMetrics([]);
-              setBankSearchQuery('');
-              setPeerSearchQuery('');
-              setBankSearchResults([]);
-              setPeerSearchResults([]);
-            }}
+            onClick={() => window.location.reload()}
           >
             Reset
           </Button>
