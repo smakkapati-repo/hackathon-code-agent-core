@@ -12,7 +12,7 @@ const Login = ({ onCognitoLogin }) => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #A020F0 0%, #8B1A9B 100%)',
+        background: 'linear-gradient(135deg, #232F3E 0%, #146EB4 100%)',
       }}
     >
       <Paper
@@ -24,7 +24,7 @@ const Login = ({ onCognitoLogin }) => {
           textAlign: 'center',
         }}
       >
-        <LockOutlinedIcon sx={{ fontSize: 48, color: '#A020F0', mb: 2 }} />
+        <LockOutlinedIcon sx={{ fontSize: 48, color: '#FF9900', mb: 2 }} />
         <Typography variant="h4" gutterBottom sx={{ fontWeight: 600 }}>
           BankIQ+ Login
         </Typography>
@@ -39,8 +39,8 @@ const Login = ({ onCognitoLogin }) => {
           startIcon={<CloudIcon />}
           sx={{
             mt: 2,
-            backgroundColor: '#A020F0',
-            '&:hover': { backgroundColor: '#8B1A9B' },
+            backgroundColor: '#FF9900',
+            '&:hover': { backgroundColor: '#EC7211' },
           }}
         >
           Sign In with AWS Cognito
